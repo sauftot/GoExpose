@@ -92,7 +92,7 @@ func consoleController(csl chan bool) {
 func relayPackets(ctrlConn *net.TCPConn) {
 	buf := make([]byte, 7)
 	for run {
-		ctrlConn.SetDeadline(time.Now().Add(2 * time.Second))
+		ctrlConn.SetDeadline(time.Now().Add(1 * time.Second))
 		_, err := ctrlConn.Read(buf)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok {
@@ -123,7 +123,6 @@ func relayPackets(ctrlConn *net.TCPConn) {
 				}
 				fmt.Println("Connection to proxy established, handing off to handlePair()...")
 				go handlePair(*proxConn)
-
 			}
 		}
 	}
@@ -131,7 +130,57 @@ func relayPackets(ctrlConn *net.TCPConn) {
 
 // relay packets between proxy and local server
 func handlePair(proxConn net.TCPConn) {
-	//connect to local server, then relay packets between proxConn and the local server until either side or program terminates
+	defer proxConn.Close()
+	locConn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: localPort})
+	if err != nil {
+		fmt.Println("ERROR: Failed connecting to local server:", err)
+		return
+	}
+	defer locConn.Close()
+	ch1 := make(chan bool)
+	ch2 := make(chan bool)
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			locConn.SetReadDeadline(time.Now().Add(1 * time.Second))
+			i, err := locConn.Read(buf)
+			if !run {
+				return
+			}
+			if err != nil {
+				ch2 <- false
+				return
+			}
+			_, err = proxConn.Write(buf[:i])
+			if err != nil {
+				ch2 <- true
+				return
+			}
+		}
+	}()
+
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			proxConn.SetReadDeadline(time.Now().Add(1 * time.Second))
+			i, err := proxConn.Read(buf)
+			if !run {
+				return
+			}
+			if err != nil {
+				ch1 <- false
+				return
+			}
+			_, err = locConn.Write(buf[:i])
+			if err != nil {
+				ch1 <- false
+				return
+			}
+		}
+	}()
+
+	<-ch1
+	<-ch2
 }
 
 func main() {

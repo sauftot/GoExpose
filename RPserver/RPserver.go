@@ -35,7 +35,7 @@ func handlePair(proxConn net.TCPConn, extConn net.TCPConn) {
 	go func() {
 		buf := make([]byte, 1024)
 		for {
-			proxConn.SetReadDeadline(time.Now().Add(1 * time.Second))
+			extConn.SetReadDeadline(time.Now().Add(1 * time.Second))
 			i, err := extConn.Read(buf)
 			if !run {
 				return
@@ -113,7 +113,7 @@ func relayPackets(ctrlConn net.Conn, status chan bool, csl2 chan bool) {
 			status <- true
 			return
 		default:
-			tcpListener.SetDeadline(time.Now().Add(2 * time.Second))
+			tcpListener.SetDeadline(time.Now().Add(1 * time.Second))
 			extConn, err := tcpListener.AcceptTCP()
 			if err != nil {
 				if netErr, ok := err.(net.Error); ok {
@@ -161,7 +161,6 @@ func relayPackets(ctrlConn net.Conn, status chan bool, csl2 chan bool) {
 				}
 			}
 		}
-
 	}
 }
 
