@@ -1,4 +1,4 @@
-package rpclient
+package main
 
 import (
 	"encoding/binary"
@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -64,8 +65,15 @@ func consoleController(csl chan bool) {
 		if err != nil {
 			fmt.Println("WARNING: Please enter a valid IP address or domain name!")
 		} else {
-			proceed = true
-			csl <- true
+			fmt.Println("Please specify the port of your application server: ")
+			fmt.Scanln(&cslString)
+			if isNumericalOnly(cslString) {
+				localPort, _ = strconv.Atoi(cslString)
+				proceed = true
+				csl <- true
+			} else {
+				fmt.Println("WARNING: Please enter a numerical port!")
+			}
 		}
 	}
 	fmt.Println("Proceeding, exit the program with the command \"stop\"")

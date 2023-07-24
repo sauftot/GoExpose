@@ -1,4 +1,4 @@
-package rpserver
+package main
 
 import (
 	"encoding/binary"
@@ -113,34 +113,8 @@ func relayPackets(ctrlConn net.Conn, status chan bool, csl2 chan bool) {
 			status <- true
 			return
 		default:
-		}
-
-		tcpListener.SetDeadline(time.Now().Add(2 * time.Second))
-		extConn, err := tcpListener.AcceptTCP()
-		if err != nil {
-			if netErr, ok := err.(net.Error); ok {
-				// Check if the error is due to a timeout
-				if netErr.Timeout() {
-					// good timeout, do nothing
-				} else {
-					// Handle other network-related errors
-					fmt.Println("ERROR: Network:", err)
-				}
-			} else {
-				// Handle non-network-related errors
-				fmt.Println("ERROR: Non-Network:", err)
-			}
-		} else {
-			// tell RPagent that an external connection has been established
-			_, err := ctrlConn.Write([]byte("extConn"))
-			if err != nil {
-				fmt.Println("ERROR: Failed writing to RPagent.")
-				status <- true
-				return
-			}
-
-			tcpProxL.SetDeadline(time.Now().Add(10 * time.Second))
-			proxConn, err := tcpProxL.AcceptTCP()
+			tcpListener.SetDeadline(time.Now().Add(2 * time.Second))
+			extConn, err := tcpListener.AcceptTCP()
 			if err != nil {
 				if netErr, ok := err.(net.Error); ok {
 					// Check if the error is due to a timeout
@@ -148,20 +122,46 @@ func relayPackets(ctrlConn net.Conn, status chan bool, csl2 chan bool) {
 						// good timeout, do nothing
 					} else {
 						// Handle other network-related errors
-						fmt.Println("Network error:", err)
+						fmt.Println("ERROR: Network:", err)
+					}
+				} else {
+					// Handle non-network-related errors
+					fmt.Println("ERROR: Non-Network:", err)
+				}
+			} else {
+				// tell RPagent that an external connection has been established
+				_, err := ctrlConn.Write([]byte("extConn"))
+				if err != nil {
+					fmt.Println("ERROR: Failed writing to RPagent.")
+					status <- true
+					return
+				}
+
+				tcpProxL.SetDeadline(time.Now().Add(10 * time.Second))
+				proxConn, err := tcpProxL.AcceptTCP()
+				if err != nil {
+					if netErr, ok := err.(net.Error); ok {
+						// Check if the error is due to a timeout
+						if netErr.Timeout() {
+							// good timeout, do nothing
+						} else {
+							// Handle other network-related errors
+							fmt.Println("Network error:", err)
+							status <- true
+							return
+						}
+					} else {
+						// Handle non-network-related errors
+						fmt.Println("Error accepting connection:", err)
 						status <- true
 						return
 					}
 				} else {
-					// Handle non-network-related errors
-					fmt.Println("Error accepting connection:", err)
-					status <- true
-					return
+					go handlePair(*proxConn, *extConn)
 				}
-			} else {
-				go handlePair(*proxConn, *extConn)
 			}
 		}
+
 	}
 }
 
@@ -172,9 +172,9 @@ func consoleController(csl chan bool, csl2 chan bool) {
 		fmt.Println("Please enter the port you want to forward to the internet: ")
 		fmt.Scanln(&cslString)
 		if isNumericalOnly(cslString) {
+			appPort, _ = strconv.Atoi(cslString)
 			proceed = true
 			csl <- true
-			appPort, _ = strconv.Atoi(cslString)
 		} else {
 			fmt.Println("WARNING: Please enter a numerical port!")
 		}
@@ -229,43 +229,43 @@ func main() {
 		case <-csl:
 			return
 		default:
-		}
-		if err != nil {
-			if netErr, ok := err.(net.Error); ok {
-				// Check if the error is due to a timeout
-				if netErr.Timeout() {
-					// good timeout, do nothing
+			if err != nil {
+				if netErr, ok := err.(net.Error); ok {
+					// Check if the error is due to a timeout
+					if netErr.Timeout() {
+						// good timeout, do nothing
+					} else {
+						// Handle other network-related errors
+						fmt.Println("Network error:", err)
+					}
 				} else {
-					// Handle other network-related errors
-					fmt.Println("Network error:", err)
+					// Handle non-network-related errors
+					fmt.Println("Error accepting connection:", err)
 				}
 			} else {
-				// Handle non-network-related errors
-				fmt.Println("Error accepting connection:", err)
-			}
-		} else {
-			// generate a 32 bit unsigned random int
-			n := rand.Uint32()
-			if n > (math.MaxUint32 - 6) {
-				n = math.MaxUint32 - 6
-			}
-			ba := make([]byte, 4)
-			binary.LittleEndian.PutUint32(ba, n)
-			_, err := conn.Write(ba)
-			if err != nil {
-				fmt.Println("ERROR: Failed writing to RPagent.")
-			} else {
-				buf := make([]byte, 4)
-				conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-				i, err := conn.Read(buf)
+				// generate a 32 bit unsigned random int
+				n := rand.Uint32()
+				if n > (math.MaxUint32 - 6) {
+					n = math.MaxUint32 - 6
+				}
+				ba := make([]byte, 4)
+				binary.LittleEndian.PutUint32(ba, n)
+				_, err := conn.Write(ba)
 				if err != nil {
-					fmt.Println("ERROR: Reading authenticator from RPagent failed.")
-				} else if i != 32 {
-					fmt.Println("ERROR: Wrong number of bytes received from RPagent.")
+					fmt.Println("ERROR: Failed writing to RPagent.")
 				} else {
-					if binary.LittleEndian.Uint32(buf) == n-5 {
-						go relayPackets(conn, status, csl2)
-						<-status
+					buf := make([]byte, 4)
+					conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+					i, err := conn.Read(buf)
+					if err != nil {
+						fmt.Println("ERROR: Reading authenticator from RPagent failed.")
+					} else if i != 32 {
+						fmt.Println("ERROR: Wrong number of bytes received from RPagent.")
+					} else {
+						if binary.LittleEndian.Uint32(buf) == n-5 {
+							go relayPackets(conn, status, csl2)
+							<-status
+						}
 					}
 				}
 			}
