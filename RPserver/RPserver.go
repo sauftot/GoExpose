@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"net"
 	"strconv"
@@ -245,6 +246,9 @@ func main() {
 		} else {
 			// generate a 32 bit unsigned random int
 			n := rand.Uint32()
+			if n > (math.MaxUint32 - 6) {
+				n = math.MaxUint32 - 6
+			}
 			ba := make([]byte, 4)
 			binary.LittleEndian.PutUint32(ba, n)
 			_, err := conn.Write(ba)
@@ -259,7 +263,7 @@ func main() {
 				} else if i != 32 {
 					fmt.Println("ERROR: Wrong number of bytes received from RPagent.")
 				} else {
-					if binary.LittleEndian.Uint32(buf) == uint32(n)-5 {
+					if binary.LittleEndian.Uint32(buf) == n-5 {
 						go relayPackets(conn, status, csl2)
 						<-status
 					}
