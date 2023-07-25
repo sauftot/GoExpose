@@ -19,6 +19,11 @@ var (
 	wg      sync.WaitGroup
 )
 
+/*
+This is one of the 2 programs making up this reverse proxy project that allows a user to expose a local server to the internet
+using a publicly routable small VPS or the likes.
+RPserver is the part that runs on the publicly routable server, and RPclient is the part that runs on the local server.
+*/
 func main() {
 	welcome()
 	fmt.Println("Waiting for control connection...")
@@ -33,23 +38,22 @@ func main() {
 	}
 	defer conn.Close()
 
+	fmt.Println("Starting controlManager...")
 	proxToCtrl := make(chan string)
-	wg.Add(1)
 	go controlManager(done, conn, proxToCtrl)
-	// the control connection is authenticated and handled, now we can listen for external connections.
-	// the program should shut down when the done channel is closed either by you using the stop command,
-	// or by the RPclient application closing the control connection
 
-	// CONTINUE HERE!!!
-	// controlManager should be done, next is to implement proxyManager which listens for connections from the outside,
-	// tells controlManager to connect to the proxy port, and then starts a goroutine to relay packets between each pair of the two connections
+	fmt.Println("Starting proxyManager...")
+	proxyManager(done, proxToCtrl)
 
-	fmt.Println("Listening for external connections on port", appPort)
-
+	fmt.Println("PROXYMANAGER returned. Shutting down all goroutines...")
+	close(done)
 	wg.Wait()
-	fmt.Println("All goroutines finished! Shutting down...")
+
+	fmt.Println("All goroutines finished! Shutting down.")
 }
 
+// pair establishes the control connection. this is the first step in setting up the reverse proxy.
+// it will listen for a connection to the controlPort from the RPclient, authenticate it and then return it to main.
 func pair(done <-chan struct{}) (*net.TCPConn, error) {
 	// make a listener for the control conn
 	l, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4zero, Port: ctrlPort})
@@ -64,7 +68,7 @@ func pair(done <-chan struct{}) (*net.TCPConn, error) {
 	for {
 		select {
 		case <-done:
-			return nil, errors.New("stop command received before pairing was complete")
+			return nil, errors.New("PAIR: stop command received before pairing was complete")
 		default:
 			// accept timeout of 1 second
 			err := l.SetDeadline(time.Now().Add(1 * time.Second))
@@ -91,6 +95,7 @@ func pair(done <-chan struct{}) (*net.TCPConn, error) {
 				} else {
 					if buf[0] == 'm' {
 						fmt.Println("Authentication successful!")
+						//authentication successful, return connection
 						return conn, nil
 					} else {
 						fmt.Println("Authentication failed!")
@@ -103,6 +108,7 @@ func pair(done <-chan struct{}) (*net.TCPConn, error) {
 	}
 }
 
+// welcome literally welcomes the user in the console and then configures the RPserver.
 func welcome() {
 	fmt.Println("Welcome to RPserver!")
 	fmt.Println("Please enter the external Port where you want to expose the server (8081-65534): ")
@@ -124,6 +130,8 @@ func welcome() {
 	}
 }
 
+// consoleController reads from the console and sends a signal to the done channel when the user enters "stop".
+// this is used to shut down the RPserver.
 func consoleController(done chan<- struct{}) {
 	for {
 		var cslString string
@@ -131,6 +139,7 @@ func consoleController(done chan<- struct{}) {
 		fmt.Scanln(&cslString)
 		switch cslString {
 		case "stop":
+			fmt.Println("CONSOLECONTROLLER: Received stop command!")
 			close(done)
 			return
 		default:
@@ -139,18 +148,22 @@ func consoleController(done chan<- struct{}) {
 	}
 }
 
+// the purpose of the controlManager is to relay the necessity for a proxyConnection from the proxyManager to the RPclient.
+// it also reads from the control connection to make sure it is still alive without actually using anything read from it.
 func controlManager(done chan<- struct{}, ctrl *net.TCPConn, proxToCtrl <-chan string) {
 	buf := make([]byte, 1)
 	for {
 		select {
-		case <-proxToCtrl:
+		case i := <-proxToCtrl:
 			// send signal to controller to connect to proxy port
-			_, err := ctrl.Write([]byte("x"))
+			fmt.Println("CONTROLMANAGER: Received signal from proxyManager, relaying via ctrlConn...")
+			_, err := ctrl.Write([]byte(i))
 			if err != nil {
 				fmt.Println("Error writing to ctrl:", err)
 				close(done)
 				return
 			}
+			fmt.Println("CONTROLMANAGER: Signal relayed successfully!")
 		default:
 			err := ctrl.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 			if err != nil {
@@ -173,6 +186,124 @@ func controlManager(done chan<- struct{}, ctrl *net.TCPConn, proxToCtrl <-chan s
 	}
 }
 
-func proxyManager() {
+// proxyManager is called when the control connection is established and authenticated.
+// it will then listen for external connections from clients, tell the controlManager to notify
+// RPclient to open a TCP connection to the proxy port, and then start a goroutine to relay packets
+func proxyManager(done <-chan struct{}, proxToCtrl chan<- string) {
+	defer wg.Done()
+	eL, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4zero, Port: appPort})
+	if err != nil {
+		fmt.Println("PROXYMANAGER: Error listening on appPort:", err)
+		return
+	}
+	defer eL.Close()
+	fmt.Println("Listening for external connections on port", appPort)
 
+	pL, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4zero, Port: proxyPort})
+	if err != nil {
+		fmt.Println("PROXYMANAGER: Error listening on proxyPort:", err)
+		return
+	}
+	defer pL.Close()
+	fmt.Println("Listening for proxy connections on port", proxyPort)
+	for {
+		select {
+		case <-done:
+			return
+		default:
+			// accept external connections
+			err := eL.SetDeadline(time.Now().Add(500 * time.Millisecond))
+			if err != nil {
+				fmt.Println("PROXYMANAGER: Error setting eL deadline:", err)
+				return
+			}
+			eConn, err := eL.AcceptTCP()
+			if err != nil {
+				if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
+					// healthy timeout keep looping
+					continue
+				} else {
+					fmt.Println("PROXYMANAGER: Error accepting eConn:", err)
+					return
+				}
+			} else {
+				defer eConn.Close()
+				fmt.Println("PROXYMANAGER: Received external connection, sending signal to controlManager...")
+
+				// send signal to controlManager to connect to proxy port
+				proxToCtrl <- "x"
+				err := pL.SetDeadline(time.Now().Add(10 * time.Second))
+				if err != nil {
+					fmt.Println("PROXYMANAGER: Error setting pL deadline:", err)
+					return
+				}
+				pConn, err := pL.AcceptTCP()
+				if err != nil {
+					if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
+						// unhealthy timeout, RPclient did not respond with a proxy connection after being asked via control connection.
+						fmt.Println("PROXYMANAGER: RPclient did not respond with a proxy connection after being asked via control connection.")
+						return
+					} else {
+						fmt.Println("PROXYMANAGER: Error accepting pConn:", err)
+						return
+					}
+				} else {
+					fmt.Println("PROXYMANAGER: Received proxy connection, handing off to handlePair()...")
+					handlePair(done, eConn, pConn)
+				}
+			}
+		}
+	}
+}
+
+func handlePair(done <-chan struct{}, eConn *net.TCPConn, pConn *net.TCPConn) {
+	wg.Add(1)
+	go func(done <-chan struct{}, eConn *net.TCPConn, pConn *net.TCPConn) {
+		defer wg.Done()
+		defer pConn.Close()
+		defer eConn.Close()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				// read from eConn and write to pConn
+				buf := make([]byte, 2048)
+				n, err := eConn.Read(buf)
+				if err != nil {
+					fmt.Println("HANDLEPAIR: Error reading from eConn:", err)
+				}
+				_, err = pConn.Write(buf[:n])
+				if err != nil {
+					fmt.Println("HANDLEPAIR: Error writing to pConn:", err)
+					return
+				}
+			}
+		}
+	}(done, eConn, pConn)
+
+	wg.Add(1)
+	go func(done <-chan struct{}, eConn *net.TCPConn, pConn *net.TCPConn) {
+		defer wg.Done()
+		defer pConn.Close()
+		defer eConn.Close()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				// read from pConn and write to eConn
+				buf := make([]byte, 2048)
+				n, err := pConn.Read(buf)
+				if err != nil {
+					fmt.Println("HANDLEPAIR: Error reading from pConn:", err)
+				}
+				_, err = eConn.Write(buf[:n])
+				if err != nil {
+					fmt.Println("HANDLEPAIR: Error writing to eConn:", err)
+					return
+				}
+			}
+		}
+	}(done, eConn, pConn)
 }
