@@ -14,7 +14,7 @@ import (
 var run bool = false
 var ctrlPort int = 47921
 var proxyPort int = 47922
-var localPort int = 8080
+var localPort int = 25566
 var RPserver string = ""
 var ip net.IP
 
@@ -29,8 +29,8 @@ func isNumericalOnly(s string) bool {
 
 func resolveDomain(domain string) (net.IP, error) {
 	ipRegex := `^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$`
-	if match, _ := regexp.MatchString(ipRegex, RPserver); match {
-		ip = net.ParseIP(RPserver)
+	if match, _ := regexp.MatchString(ipRegex, domain); match {
+		ip = net.ParseIP(domain)
 		if ip == nil {
 			fmt.Println("Invalid IP address.")
 			return nil, errors.New("invalid IP address")
@@ -40,8 +40,8 @@ func resolveDomain(domain string) (net.IP, error) {
 
 	// Check if it's a valid domain name
 	domainRegex := `^([a-zA-Z0-9][a-zA-Z0-9-]*\.)+[a-zA-Z]{2,}$`
-	if match, _ := regexp.MatchString(domainRegex, RPserver); match {
-		ipAddr, err := net.ResolveIPAddr("ip", RPserver)
+	if match, _ := regexp.MatchString(domainRegex, domain); match {
+		ipAddr, err := net.ResolveIPAddr("ip", domain)
 		if err != nil {
 			fmt.Println("Error resolving domain:", err)
 			return nil, errors.New("error resolving domain")
@@ -91,6 +91,7 @@ func consoleController(csl chan bool) {
 
 // wait for signals from RPserver then establish proxConn and hand off [proxConn, locConn] to handlePair()
 func relayPackets(ctrlConn *net.TCPConn) {
+	fmt.Println("Waiting for extConn from RPserver...")
 	buf := make([]byte, 7)
 	for run {
 		ctrlConn.SetDeadline(time.Now().Add(1 * time.Second))
@@ -190,6 +191,7 @@ func main() {
 	go consoleController(cslIn)
 	<-cslIn
 
+	fmt.Println("Attempting to connect to RPserver...")
 	// attempt connection and authentication on RPserver
 	ctrlConn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: ip, Port: ctrlPort})
 	if err != nil {
@@ -201,6 +203,7 @@ func main() {
 	authInt := binary.LittleEndian.Uint32(authBuf)
 	authInt = authInt + 5
 	binary.LittleEndian.PutUint32(authBuf, authInt)
+	fmt.Println("Attempting to authenticate to RPserver...")
 	_, err = ctrlConn.Write(authBuf)
 	if err != nil {
 		fmt.Println("Error writing auth to RPserver:", err)
@@ -208,5 +211,6 @@ func main() {
 	}
 
 	// on-success: start relayPackets goroutine
+	fmt.Println("Authenticated to RPserver, starting relayPackets()...")
 	relayPackets(ctrlConn)
 }

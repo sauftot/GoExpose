@@ -1,273 +1,178 @@
 package main
 
 import (
-	"encoding/binary"
+	"errors"
 	"fmt"
-	"log"
-	"math"
-	"math/rand"
 	"net"
 	"strconv"
-	"strings"
+	"sync"
 	"time"
 )
 
-var ctrlPort = 47921
-var proxyPort = 47922
-var appPort = 8080
-var run = false
+const (
+	ctrlPort  = 47921
+	proxyPort = 47922
+)
 
-func isNumericalOnly(s string) bool {
-	for _, char := range s {
-		if char < '0' || char > '9' {
-			return false
-		}
-	}
-	return true
-}
+var (
+	appPort = 25565
+	wg      sync.WaitGroup
+)
 
-// continously relay packets between the two connections until one peer shuts down
-func handlePair(proxConn net.TCPConn, extConn net.TCPConn) {
-	defer proxConn.Close()
-	defer extConn.Close()
-	ch1 := make(chan bool)
-	ch2 := make(chan bool)
-	go func() {
-		buf := make([]byte, 1024)
-		for {
-			extConn.SetReadDeadline(time.Now().Add(1 * time.Second))
-			i, err := extConn.Read(buf)
-			if !run {
-				return
-			}
-			if err != nil {
-				ch2 <- false
-				return
-			}
-			_, err = proxConn.Write(buf[:i])
-			if err != nil {
-				ch2 <- true
-				return
-			}
-		}
-	}()
+func main() {
+	welcome()
+	fmt.Println("Waiting for control connection...")
+	done := make(chan struct{})
+	go consoleController(done)
 
-	go func() {
-		buf := make([]byte, 1024)
-		for {
-			proxConn.SetReadDeadline(time.Now().Add(1 * time.Second))
-			i, err := proxConn.Read(buf)
-			if !run {
-				return
-			}
-			if err != nil {
-				ch1 <- false
-				return
-			}
-			_, err = extConn.Write(buf[:i])
-			if err != nil {
-				ch1 <- false
-				return
-			}
-		}
-	}()
-
-	<-ch1
-	<-ch2
-}
-
-func relayPackets(ctrlConn net.Conn, status chan bool, csl2 chan bool) {
-	listener, err := net.Listen("tcp", ":"+strconv.Itoa(appPort))
+	conn, err := pair(done)
 	if err != nil {
-		log.Fatal(err)
-		status <- true
+		fmt.Println("Error pairing:", err.Error())
+		fmt.Println("Shutting down...")
 		return
 	}
-	defer listener.Close()
+	defer conn.Close()
 
-	proxL, err2 := net.Listen("tcp", ":"+strconv.Itoa(proxyPort))
-	if err2 != nil {
-		log.Fatal(err)
-		status <- true
-		return
+	proxToCtrl := make(chan string)
+	wg.Add(1)
+	go controlManager(done, conn, proxToCtrl)
+	// the control connection is authenticated and handled, now we can listen for external connections.
+	// the program should shut down when the done channel is closed either by you using the stop command,
+	// or by the RPclient application closing the control connection
+
+	// CONTINUE HERE!!!
+	// controlManager should be done, next is to implement proxyManager which listens for connections from the outside,
+	// tells controlManager to connect to the proxy port, and then starts a goroutine to relay packets between each pair of the two connections
+
+	fmt.Println("Listening for external connections on port", appPort)
+
+	wg.Wait()
+	fmt.Println("All goroutines finished! Shutting down...")
+}
+
+func pair(done <-chan struct{}) (*net.TCPConn, error) {
+	// make a listener for the control conn
+	l, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4zero, Port: ctrlPort})
+	if err != nil {
+		fmt.Println("Error listening:", err)
+		return nil, errors.New("error listening")
 	}
-	defer listener.Close()
+	defer l.Close()
 
-	tcpListener, ok := listener.(*net.TCPListener)
-	if !ok {
-		fmt.Println("ERROR: Listener is not a TCPListener")
-		status <- true
-		return
-	}
-
-	tcpProxL, ok := proxL.(*net.TCPListener)
-	if !ok {
-		fmt.Println("ERROR: Listener is not a TCPListener")
-		status <- true
-		return
-	}
-
+	// keep accepting connections until we get one from the client or the user stops the server
+	buf := make([]byte, 1)
 	for {
 		select {
-		case <-csl2:
-			status <- true
+		case <-done:
+			return nil, errors.New("stop command received before pairing was complete")
+		default:
+			// accept timeout of 1 second
+			err := l.SetDeadline(time.Now().Add(1 * time.Second))
+			if err != nil {
+				fmt.Println("Error setting deadline:", err)
+				return nil, errors.New("error setting deadline")
+			}
+			conn, err := l.AcceptTCP()
+			if err != nil {
+				if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
+					// healthy timeout keep looping
+					continue
+				}
+				fmt.Println("Error accepting:", err)
+				return nil, errors.New("error accepting")
+			} else {
+				// control connection established, authenticate
+				fmt.Println("Control connection established. Attempting authentication...")
+				conn.Write([]byte("a"))
+				conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+				_, err := conn.Read(buf)
+				if err != nil {
+					return nil, errors.New("error reading from control connection")
+				} else {
+					if buf[0] == 'm' {
+						fmt.Println("Authentication successful!")
+						return conn, nil
+					} else {
+						fmt.Println("Authentication failed!")
+						conn.Close()
+						continue
+					}
+				}
+			}
+		}
+	}
+}
+
+func welcome() {
+	fmt.Println("Welcome to RPserver!")
+	fmt.Println("Please enter the external Port where you want to expose the server (8081-65534): ")
+	var buf string
+	proceed := false
+	for !proceed {
+		fmt.Scanln(&buf)
+		intBuf, err := strconv.Atoi(buf)
+		if err != nil {
+			fmt.Println("Please enter a numerical port number!")
+		} else {
+			if intBuf > 8080 && intBuf < 65535 {
+				appPort = intBuf
+				proceed = true
+			} else {
+				fmt.Println("Please enter a port number between 8080 and 65535!")
+			}
+		}
+	}
+}
+
+func consoleController(done chan<- struct{}) {
+	for {
+		var cslString string
+		fmt.Println("Enter \"stop\" to stop the server.")
+		fmt.Scanln(&cslString)
+		switch cslString {
+		case "stop":
+			close(done)
 			return
 		default:
-			tcpListener.SetDeadline(time.Now().Add(1 * time.Second))
-			extConn, err := tcpListener.AcceptTCP()
+			fmt.Println("Command not recognized! Enter \"stop\" to stop the server.")
+		}
+	}
+}
+
+func controlManager(done chan<- struct{}, ctrl *net.TCPConn, proxToCtrl <-chan string) {
+	buf := make([]byte, 1)
+	for {
+		select {
+		case <-proxToCtrl:
+			// send signal to controller to connect to proxy port
+			_, err := ctrl.Write([]byte("x"))
 			if err != nil {
-				if netErr, ok := err.(net.Error); ok {
-					// Check if the error is due to a timeout
-					if netErr.Timeout() {
-						// good timeout, do nothing
-					} else {
-						// Handle other network-related errors
-						fmt.Println("ERROR: Network:", err)
-					}
+				fmt.Println("Error writing to ctrl:", err)
+				close(done)
+				return
+			}
+		default:
+			err := ctrl.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+			if err != nil {
+				fmt.Println("Error setting ctrl deadline:", err)
+				close(done)
+				return
+			}
+			_, err = ctrl.Read(buf)
+			if err != nil {
+				if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
+					// healthy timeout keep looping
+					continue
 				} else {
-					// Handle non-network-related errors
-					fmt.Println("ERROR: Non-Network:", err)
-				}
-			} else {
-				// tell RPagent that an external connection has been established
-				_, err := ctrlConn.Write([]byte("extConn"))
-				if err != nil {
-					fmt.Println("ERROR: Failed writing to RPagent.")
-					status <- true
+					fmt.Println("Error reading from ctrl:", err)
+					close(done)
 					return
 				}
-
-				tcpProxL.SetDeadline(time.Now().Add(10 * time.Second))
-				proxConn, err := tcpProxL.AcceptTCP()
-				if err != nil {
-					if netErr, ok := err.(net.Error); ok {
-						// Check if the error is due to a timeout
-						if netErr.Timeout() {
-							// good timeout, do nothing
-						} else {
-							// Handle other network-related errors
-							fmt.Println("Network error:", err)
-							status <- true
-							return
-						}
-					} else {
-						// Handle non-network-related errors
-						fmt.Println("Error accepting connection:", err)
-						status <- true
-						return
-					}
-				} else {
-					go handlePair(*proxConn, *extConn)
-				}
 			}
 		}
 	}
 }
 
-func consoleController(csl chan bool, csl2 chan bool) {
-	fmt.Println("Welcome to RPServer!")
-	var cslString string
-	for proceed := false; !proceed; {
-		fmt.Println("Please enter the port you want to forward to the internet: ")
-		fmt.Scanln(&cslString)
-		if isNumericalOnly(cslString) {
-			appPort, _ = strconv.Atoi(cslString)
-			proceed = true
-			csl <- true
-		} else {
-			fmt.Println("WARNING: Please enter a numerical port!")
-		}
-	}
-	fmt.Println("Proceeding, exit the program with the command \"stop\"")
-	for {
-		fmt.Scanln(&cslString)
-		if strings.ToLower(cslString) == "stop" {
-			csl <- false
-			csl2 <- false
-			run = false
-			return
-		} else {
-			fmt.Println("WARNING: Invalid command!")
-		}
-	}
-}
+func proxyManager() {
 
-// open a tcp server on a port defined by a global variable
-// and wait for a connection to arrive then start a goroutine that lasts until the connection is closed
-func main() {
-	// create console logger and interface
-	csl := make(chan bool)
-	csl2 := make(chan bool)
-	run = true
-	go consoleController(csl, csl2)
-
-	<-csl
-
-	// create a listener
-	listener, err := net.Listen("tcp", ":"+strconv.Itoa(ctrlPort))
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer listener.Close()
-
-	tcpListener, ok := listener.(*net.TCPListener)
-	if !ok {
-		fmt.Println("Listener is not a TCPListener")
-		return
-	}
-
-	status := make(chan bool)
-
-	var conn net.TCPConn
-	defer conn.Close()
-	// accept connections
-	for {
-		tcpListener.SetDeadline(time.Now().Add(2 * time.Second))
-		conn, err := tcpListener.AcceptTCP()
-		select {
-		case <-csl:
-			return
-		default:
-			if err != nil {
-				if netErr, ok := err.(net.Error); ok {
-					// Check if the error is due to a timeout
-					if netErr.Timeout() {
-						// good timeout, do nothing
-					} else {
-						// Handle other network-related errors
-						fmt.Println("Network error:", err)
-					}
-				} else {
-					// Handle non-network-related errors
-					fmt.Println("Error accepting connection:", err)
-				}
-			} else {
-				// generate a 32 bit unsigned random int
-				n := rand.Uint32()
-				if n > (math.MaxUint32 - 6) {
-					n = math.MaxUint32 - 6
-				}
-				ba := make([]byte, 4)
-				binary.LittleEndian.PutUint32(ba, n)
-				_, err := conn.Write(ba)
-				if err != nil {
-					fmt.Println("ERROR: Failed writing to RPagent.")
-				} else {
-					buf := make([]byte, 4)
-					conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-					i, err := conn.Read(buf)
-					if err != nil {
-						fmt.Println("ERROR: Reading authenticator from RPagent failed.")
-					} else if i != 32 {
-						fmt.Println("ERROR: Wrong number of bytes received from RPagent.")
-					} else {
-						if binary.LittleEndian.Uint32(buf) == n-5 {
-							go relayPackets(conn, status, csl2)
-							<-status
-						}
-					}
-				}
-			}
-		}
-	}
 }
