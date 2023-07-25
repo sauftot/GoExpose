@@ -23,6 +23,9 @@ var (
 This is one of the 2 programs making up this reverse proxy project that allows a user to expose a local server to the internet
 using a publicly routable small VPS or the likes.
 RPserver is the part that runs on the publicly routable server, and RPclient is the part that runs on the local server.
+------------------------------------------------------------------------------------------------------------------------
+!IMPORTANT! This project only implements basic VERY BASIC authentication, and should not be used in a production environment
+or in a public environment without additional security changes, measures and monitoring.
 */
 func main() {
 	welcome()
