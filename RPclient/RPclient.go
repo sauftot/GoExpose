@@ -54,7 +54,6 @@ func resolveDomain(domain string) (net.IP, error) {
 }
 
 // make user input address of RPserver, and port for local server then wait for stop command
-// ! still needs implementation for local server port input !
 func consoleController(csl chan bool) {
 	fmt.Println("Welcome to RPclient!")
 	var cslString string
@@ -65,14 +64,16 @@ func consoleController(csl chan bool) {
 		if err != nil {
 			fmt.Println("WARNING: Please enter a valid IP address or domain name!")
 		} else {
-			fmt.Println("Please specify the port of your application server: ")
-			fmt.Scanln(&cslString)
-			if isNumericalOnly(cslString) {
-				localPort, _ = strconv.Atoi(cslString)
-				proceed = true
-				csl <- true
-			} else {
-				fmt.Println("WARNING: Please enter a numerical port!")
+			for proceed2 := false; !proceed2; {
+				fmt.Println("Please specify the port of your application server: ")
+				fmt.Scanln(&cslString)
+				if isNumericalOnly(cslString) {
+					localPort, _ = strconv.Atoi(cslString)
+					proceed, proceed2 = true, true
+					csl <- true
+				} else {
+					fmt.Println("WARNING: Please enter a numerical port!")
+				}
 			}
 		}
 	}
