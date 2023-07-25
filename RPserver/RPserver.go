@@ -25,7 +25,7 @@ using a publicly routable small VPS or the likes.
 RPserver is the part that runs on the publicly routable server, and RPclient is the part that runs on the local server.
 ------------------------------------------------------------------------------------------------------------------------
 !IMPORTANT! This project only implements basic VERY BASIC authentication, and should not be used in a production environment
-or in a public environment without additional security changes, measures and monitoring.
+or in a public environment without additional security changes, measures and monitoring. This is basically pgrok but worse.
 */
 func main() {
 	welcome()
