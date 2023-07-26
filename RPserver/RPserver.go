@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"net"
@@ -92,7 +93,7 @@ func pair(done <-chan struct{}) (*net.TCPConn, error) {
 				fmt.Println("Control connection established. Attempting authentication...")
 				conn.Write([]byte("a"))
 				conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-				_, err := conn.Read(buf)
+				buf[0], err = bufio.NewReader(conn).ReadByte()
 				if err != nil {
 					return nil, errors.New("error reading from control connection")
 				} else {
