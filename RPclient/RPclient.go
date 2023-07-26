@@ -1,216 +1,130 @@
 package main
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
 	"regexp"
-	"strconv"
-	"strings"
+	"sync"
 	"time"
 )
 
-var run bool = false
-var ctrlPort int = 47921
-var proxyPort int = 47922
-var localPort int = 25566
-var RPserver string = ""
-var ip net.IP
+const (
+	ctrlPort  int = 47921
+	proxyPort int = 47922
+)
 
-func isNumericalOnly(s string) bool {
-	for _, char := range s {
-		if char < '0' || char > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-func resolveDomain(domain string) (net.IP, error) {
-	ipRegex := `^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$`
-	if match, _ := regexp.MatchString(ipRegex, domain); match {
-		ip = net.ParseIP(domain)
-		if ip == nil {
-			fmt.Println("Invalid IP address.")
-			return nil, errors.New("invalid IP address")
-		}
-		return ip, nil
-	}
-
-	// Check if it's a valid domain name
-	domainRegex := `^([a-zA-Z0-9][a-zA-Z0-9-]*\.)+[a-zA-Z]{2,}$`
-	if match, _ := regexp.MatchString(domainRegex, domain); match {
-		ipAddr, err := net.ResolveIPAddr("ip", domain)
-		if err != nil {
-			fmt.Println("Error resolving domain:", err)
-			return nil, errors.New("error resolving domain")
-		}
-		ip = ipAddr.IP
-		fmt.Println("Resolved domain to IP:", ip.String())
-		return ip, nil
-	}
-	return nil, errors.New("invalid IP address or domain name")
-}
-
-// make user input address of RPserver, and port for local server then wait for stop command
-func consoleController(csl chan bool) {
-	fmt.Println("Welcome to RPclient!")
-	var cslString string
-	for proceed := false; !proceed; {
-		fmt.Println("Please specify the address of your RPserver: ")
-		fmt.Scanln(&cslString)
-		_, err := resolveDomain(cslString)
-		if err != nil {
-			fmt.Println("WARNING: Please enter a valid IP address or domain name!")
-		} else {
-			for proceed2 := false; !proceed2; {
-				fmt.Println("Please specify the port of your application server: ")
-				fmt.Scanln(&cslString)
-				if isNumericalOnly(cslString) {
-					localPort, _ = strconv.Atoi(cslString)
-					proceed, proceed2 = true, true
-					csl <- true
-				} else {
-					fmt.Println("WARNING: Please enter a numerical port!")
-				}
-			}
-		}
-	}
-	fmt.Println("Proceeding, exit the program with the command \"stop\"")
-	for run {
-		fmt.Scanln(&cslString)
-		if strings.ToLower(cslString) == "stop" {
-			run = false
-			return
-		} else {
-			fmt.Println("WARNING: Invalid command!")
-		}
-	}
-}
-
-// wait for signals from RPserver then establish proxConn and hand off [proxConn, locConn] to handlePair()
-func relayPackets(ctrlConn *net.TCPConn) {
-	fmt.Println("Waiting for extConn from RPserver...")
-	buf := make([]byte, 7)
-	for run {
-		ctrlConn.SetDeadline(time.Now().Add(1 * time.Second))
-		_, err := ctrlConn.Read(buf)
-		if err != nil {
-			if netErr, ok := err.(net.Error); ok {
-				// Check if the error is due to a timeout
-				if netErr.Timeout() {
-					// good timeout, do nothing
-				} else {
-					// Handle other network-related errors
-					fmt.Println("ERROR: Network:", err)
-					run = false
-					return
-				}
-			} else {
-				// Handle non-network-related errors
-				fmt.Println("ERROR: Non-Network:", err)
-				run = false
-				return
-			}
-		} else {
-			if string(buf) == "extConn" {
-				fmt.Println("Received signal from RPserver, attempting connection to proxy...")
-				// attempt connection to proxy
-				proxConn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: ip, Port: proxyPort})
-				if err != nil {
-					fmt.Println("ERROR: Failed connecting to proxy:", err)
-					run = false
-					return
-				}
-				fmt.Println("Connection to proxy established, handing off to handlePair()...")
-				go handlePair(*proxConn)
-			}
-		}
-	}
-}
-
-// relay packets between proxy and local server
-func handlePair(proxConn net.TCPConn) {
-	defer proxConn.Close()
-	locConn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: localPort})
-	if err != nil {
-		fmt.Println("ERROR: Failed connecting to local server:", err)
-		return
-	}
-	defer locConn.Close()
-	ch1 := make(chan bool)
-	ch2 := make(chan bool)
-	go func() {
-		buf := make([]byte, 1024)
-		for {
-			locConn.SetReadDeadline(time.Now().Add(1 * time.Second))
-			i, err := locConn.Read(buf)
-			if !run {
-				return
-			}
-			if err != nil {
-				ch2 <- false
-				return
-			}
-			_, err = proxConn.Write(buf[:i])
-			if err != nil {
-				ch2 <- true
-				return
-			}
-		}
-	}()
-
-	go func() {
-		buf := make([]byte, 1024)
-		for {
-			proxConn.SetReadDeadline(time.Now().Add(1 * time.Second))
-			i, err := proxConn.Read(buf)
-			if !run {
-				return
-			}
-			if err != nil {
-				ch1 <- false
-				return
-			}
-			_, err = locConn.Write(buf[:i])
-			if err != nil {
-				ch1 <- false
-				return
-			}
-		}
-	}()
-
-	<-ch1
-	<-ch2
-}
+var (
+	localPort int    = 25565
+	ip        string = ""
+	wg        sync.WaitGroup
+)
 
 func main() {
-	run = true
-	cslIn := make(chan bool)
-	go consoleController(cslIn)
-	<-cslIn
-
-	fmt.Println("Attempting to connect to RPserver...")
-	// attempt connection and authentication on RPserver
-	ctrlConn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: ip, Port: ctrlPort})
+	welcome()
+	fmt.Println("Establishing control connection (5s Timeout)...")
+	conn, err := pair()
 	if err != nil {
-		fmt.Println("Error dialing RPserver:", err)
+		fmt.Println("Error pairing:", err.Error())
+		fmt.Println("Shutting down...")
 		return
 	}
-	authBuf := make([]byte, 4)
-	ctrlConn.Read(authBuf)
-	authInt := binary.LittleEndian.Uint32(authBuf)
-	authInt = authInt + 5
-	binary.LittleEndian.PutUint32(authBuf, authInt)
-	fmt.Println("Attempting to authenticate to RPserver...")
-	_, err = ctrlConn.Write(authBuf)
-	if err != nil {
-		fmt.Println("Error writing auth to RPserver:", err)
-		return
+	defer conn.Close()
+
+	done := make(chan struct{})
+	go consoleController(done)
+
+	wg.Wait()
+}
+
+func welcome() {
+	fmt.Println("Welcome to RPclient!")
+	proceed := false
+	for !proceed {
+		fmt.Println("Enter the address of your RPserver (Domain or IP): ")
+		var serverAddress string
+		fmt.Scanln(&serverAddress)
+		lip, err := resolveAddress(serverAddress)
+		if err != nil {
+			fmt.Println(err)
+			continue
+		} else {
+			ip = lip
+			for !proceed {
+				fmt.Println("Enter the port of your local application server you wish to expose: ")
+				fmt.Scanln(&localPort)
+				if localPort < 1 || localPort > 65535 {
+					fmt.Println("WELCOME: invalid port number!")
+					continue
+				} else {
+					proceed = true
+				}
+			}
+		}
 	}
 
-	// on-success: start relayPackets goroutine
-	fmt.Println("Authenticated to RPserver, starting relayPackets()...")
-	relayPackets(ctrlConn)
+}
+
+// check if input is valid IP or domain, if domain then it resolves the domain to an IP
+func resolveAddress(address string) (string, error) {
+	ipPattern := `^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$`
+	if match, _ := regexp.MatchString(ipPattern, address); match {
+		return address, nil
+	} else {
+		ips, err := net.LookupIP(address)
+		if err != nil {
+			fmt.Println("RESOLVEADDRESS:", err)
+			return "", errors.New("error resolving domain")
+		}
+		return ips[0].String(), nil
+	}
+}
+
+func consoleController(done chan<- struct{}) {
+	for {
+		var cslString string
+		fmt.Println("Enter \"stop\" to stop the server.")
+		fmt.Scanln(&cslString)
+		switch cslString {
+		case "stop":
+			fmt.Println("CONSOLECONTROLLER: Received stop command!")
+			close(done)
+			return
+		default:
+			fmt.Println("Command not recognized! Enter \"stop\" to stop the server.")
+		}
+	}
+}
+
+func pair() (*net.TCPConn, error) {
+	// attempt to dial RPserver on control port
+	conn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: net.ParseIP(ip), Port: ctrlPort})
+	if err != nil {
+		fmt.Println("PAIR: Error dialing control port:", err.Error())
+		return nil, errors.New("error dialing control port")
+	}
+	// read from control connection
+	buf := make([]byte, 1)
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_, err = conn.Read(buf)
+	if err != nil {
+		fmt.Println("PAIR: Error receiving handshake on control connection")
+		return nil, err
+	} else {
+		if buf[0] == 'a' {
+			fmt.Println("Received handshake... Sending authentication...")
+			//authentication successful, return connection
+			_, err = conn.Write([]byte("m"))
+			if err != nil {
+				fmt.Println("PAIR: Error handshaking on control connection")
+				return nil, errors.New("failed to send authentication byte")
+			}
+			return conn, nil
+		} else {
+			fmt.Println("PAIR: Authentication failed")
+			conn.Close()
+			return nil, errors.New("wrong handshake received")
+		}
+	}
+	// check if received byte is 'm'
 }

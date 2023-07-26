@@ -275,6 +275,7 @@ func handlePair(done <-chan struct{}, eConn *net.TCPConn, pConn *net.TCPConn) {
 				n, err := eConn.Read(buf)
 				if err != nil {
 					fmt.Println("HANDLEPAIR: Error reading from eConn:", err)
+					return
 				}
 				_, err = pConn.Write(buf[:n])
 				if err != nil {
@@ -300,6 +301,7 @@ func handlePair(done <-chan struct{}, eConn *net.TCPConn, pConn *net.TCPConn) {
 				n, err := pConn.Read(buf)
 				if err != nil {
 					fmt.Println("HANDLEPAIR: Error reading from pConn:", err)
+					return
 				}
 				_, err = eConn.Write(buf[:n])
 				if err != nil {
