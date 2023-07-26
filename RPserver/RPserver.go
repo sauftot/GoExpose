@@ -260,6 +260,7 @@ func proxyManager(done <-chan struct{}, proxToCtrl chan<- string) {
 	}
 }
 
+// relay packets between the external connection and the proxy connection
 func handlePair(done <-chan struct{}, eConn *net.TCPConn, pConn *net.TCPConn) {
 	wg.Add(1)
 	go func(done <-chan struct{}, eConn *net.TCPConn, pConn *net.TCPConn) {

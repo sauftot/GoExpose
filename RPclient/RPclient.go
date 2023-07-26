@@ -21,6 +21,14 @@ var (
 	wg        sync.WaitGroup
 )
 
+/*
+This is one of the 2 programs making up this reverse proxy project that allows a user to expose a local server to the internet
+using a publicly routable small VPS or the likes.
+RPclient is the part that runs on your local machine behind a NAT or packet inspecting firewall.
+------------------------------------------------------------------------------------------------------------------------
+!IMPORTANT! This project only implements basic VERY BASIC authentication, and should not be used in a production environment
+or in a public environment without additional security changes, measures and monitoring. This is basically pgrok but worse.
+*/
 func main() {
 	welcome()
 	fmt.Println("Establishing control connection (5s Timeout)...")
@@ -43,6 +51,7 @@ func main() {
 	fmt.Println("All goroutines finished! Shutting down.")
 }
 
+// welcome literally welcomes the user in the console and then configures the RPclient.
 func welcome() {
 	fmt.Println("Welcome to RPclient!")
 	proceed := false
@@ -86,6 +95,7 @@ func resolveAddress(address string) (string, error) {
 	}
 }
 
+// consoleController reads from the console and shuts down the RPclient when the user enters "stop".
 func consoleController(done chan<- struct{}) {
 	for {
 		var cslString string
@@ -102,6 +112,7 @@ func consoleController(done chan<- struct{}) {
 	}
 }
 
+// pair establishes the control connection and authenticates it. this is the first step in setting up the reverse proxy from the client side.
 func pair() (*net.TCPConn, error) {
 	// attempt to dial RPserver on control port
 	conn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: net.ParseIP(ip), Port: ctrlPort})
@@ -135,6 +146,9 @@ func pair() (*net.TCPConn, error) {
 	// check if received byte is 'm'
 }
 
+// controlManager waits for RPserver to signal that there is an outstanding external connection to be relayed.
+// this is done through the control connection. It then connects to the proxy port on RPserver and the local server
+// and hands those connections off to handlePair for relaying.
 func controlManager(done chan struct{}, conn *net.TCPConn) {
 	// listen for control messages
 	for {
@@ -178,6 +192,7 @@ func controlManager(done chan struct{}, conn *net.TCPConn) {
 	}
 }
 
+// relay packets between the proxy connection and the local server
 func handlePair(done <-chan struct{}, pConn net.TCPConn, lConn net.TCPConn) {
 	wg.Add(1)
 	go func(done <-chan struct{}, pConn net.TCPConn, lConn net.TCPConn) {
