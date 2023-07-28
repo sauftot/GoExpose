@@ -47,7 +47,7 @@ func main() {
 	go controlManager(done, conn, proxToCtrl)
 
 	fmt.Println("Starting proxyManager...")
-	if !proxyManager(done, proxToCtrl) {
+	if !proxyManager(done, proxToCtrl, conn.RemoteAddr()) {
 		close(done)
 	}
 
@@ -194,7 +194,7 @@ func controlManager(done chan<- struct{}, ctrl *net.TCPConn, proxToCtrl <-chan s
 // proxyManager is called when the control connection is established and authenticated.
 // it will then listen for external connections from clients, tell the controlManager to notify
 // RPclient to open a TCP connection to the proxy port, and then start a goroutine to relay packets
-func proxyManager(done <-chan struct{}, proxToCtrl chan<- string) bool {
+func proxyManager(done <-chan struct{}, proxToCtrl chan<- string, client net.Addr) bool {
 	defer wg.Done()
 	eL, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4zero, Port: appPort})
 	if err != nil {
@@ -231,6 +231,10 @@ func proxyManager(done <-chan struct{}, proxToCtrl chan<- string) bool {
 					fmt.Println("PROXYMANAGER: Error accepting eConn:", err)
 					return false
 				}
+			} else if eConn.RemoteAddr() != client {
+				fmt.Println("PROXYMANAGER: Received connection from unauthorized client:", eConn.RemoteAddr())
+				eConn.Close()
+				continue
 			} else {
 				defer eConn.Close()
 				fmt.Println("PROXYMANAGER: Received external connection, sending signal to controlManager...")
