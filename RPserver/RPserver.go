@@ -231,10 +231,6 @@ func proxyManager(done <-chan struct{}, proxToCtrl chan<- string, client net.Add
 					fmt.Println("PROXYMANAGER: Error accepting eConn:", err)
 					return false
 				}
-			} else if eConn.RemoteAddr() != client {
-				fmt.Println("PROXYMANAGER: Received connection from unauthorized client:", eConn.RemoteAddr())
-				eConn.Close()
-				continue
 			} else {
 				defer eConn.Close()
 				fmt.Println("PROXYMANAGER: Received external connection, sending signal to controlManager...")
@@ -251,6 +247,10 @@ func proxyManager(done <-chan struct{}, proxToCtrl chan<- string, client net.Add
 					if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
 						// unhealthy timeout, RPclient did not respond with a proxy connection after being asked via control connection.
 						fmt.Println("PROXYMANAGER: RPclient did not respond with a proxy connection after being asked via control connection.")
+						eConn.Close()
+						continue
+					} else if pConn.RemoteAddr() != client {
+						fmt.Println("PROXYMANAGER: Received connection from unauthorized client:", eConn.RemoteAddr())
 						eConn.Close()
 						continue
 					} else {
