@@ -47,10 +47,11 @@ func main() {
 	go controlManager(done, conn, proxToCtrl)
 
 	fmt.Println("Starting proxyManager...")
-	proxyManager(done, proxToCtrl)
+	if !proxyManager(done, proxToCtrl) {
+		close(done)
+	}
 
 	fmt.Println("PROXYMANAGER returned. Shutting down all goroutines...")
-	close(done)
 	wg.Wait()
 
 	fmt.Println("All goroutines finished! Shutting down.")
@@ -193,12 +194,12 @@ func controlManager(done chan<- struct{}, ctrl *net.TCPConn, proxToCtrl <-chan s
 // proxyManager is called when the control connection is established and authenticated.
 // it will then listen for external connections from clients, tell the controlManager to notify
 // RPclient to open a TCP connection to the proxy port, and then start a goroutine to relay packets
-func proxyManager(done <-chan struct{}, proxToCtrl chan<- string) {
+func proxyManager(done <-chan struct{}, proxToCtrl chan<- string) bool {
 	defer wg.Done()
 	eL, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4zero, Port: appPort})
 	if err != nil {
 		fmt.Println("PROXYMANAGER: Error listening on appPort:", err)
-		return
+		return false
 	}
 	defer eL.Close()
 	fmt.Println("Listening for external connections on port", appPort)
@@ -206,20 +207,20 @@ func proxyManager(done <-chan struct{}, proxToCtrl chan<- string) {
 	pL, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4zero, Port: proxyPort})
 	if err != nil {
 		fmt.Println("PROXYMANAGER: Error listening on proxyPort:", err)
-		return
+		return false
 	}
 	defer pL.Close()
 	fmt.Println("Listening for proxy connections on port", proxyPort)
 	for {
 		select {
 		case <-done:
-			return
+			return true
 		default:
 			// accept external connections
 			err := eL.SetDeadline(time.Now().Add(500 * time.Millisecond))
 			if err != nil {
 				fmt.Println("PROXYMANAGER: Error setting eL deadline:", err)
-				return
+				return false
 			}
 			eConn, err := eL.AcceptTCP()
 			if err != nil {
@@ -228,7 +229,7 @@ func proxyManager(done <-chan struct{}, proxToCtrl chan<- string) {
 					continue
 				} else {
 					fmt.Println("PROXYMANAGER: Error accepting eConn:", err)
-					return
+					return false
 				}
 			} else {
 				defer eConn.Close()
@@ -239,17 +240,18 @@ func proxyManager(done <-chan struct{}, proxToCtrl chan<- string) {
 				err := pL.SetDeadline(time.Now().Add(10 * time.Second))
 				if err != nil {
 					fmt.Println("PROXYMANAGER: Error setting pL deadline:", err)
-					return
+					return false
 				}
 				pConn, err := pL.AcceptTCP()
 				if err != nil {
 					if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
 						// unhealthy timeout, RPclient did not respond with a proxy connection after being asked via control connection.
 						fmt.Println("PROXYMANAGER: RPclient did not respond with a proxy connection after being asked via control connection.")
-						return
+						eConn.Close()
+						continue
 					} else {
 						fmt.Println("PROXYMANAGER: Error accepting pConn:", err)
-						return
+						return false
 					}
 				} else {
 					fmt.Println("PROXYMANAGER: Received proxy connection, handing off to handlePair()...")

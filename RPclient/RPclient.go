@@ -170,6 +170,11 @@ func controlManager(done chan struct{}, conn *net.TCPConn) {
 			}
 			if buf == 'x' {
 				fmt.Println("CONTROLMANAGER: Received proxy signal from RPServer!")
+				lConn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: net.IPv4zero, Port: localPort})
+				if err != nil {
+					fmt.Println("CONTROLMANAGER: Local server is offline:", err.Error())
+					continue
+				}
 				// connect to RPserver proxPort
 				pConn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: net.ParseIP(ip), Port: proxyPort})
 				if err != nil {
@@ -178,11 +183,7 @@ func controlManager(done chan struct{}, conn *net.TCPConn) {
 				}
 				fmt.Println("CONTROLMANAGER: Connected to proxy port!")
 				// connect to localhost:localPort
-				lConn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: net.IPv4zero, Port: localPort})
-				if err != nil {
-					fmt.Println("CONTROLMANAGER: Error dialing local port:", err.Error())
-					return
-				}
+
 				fmt.Println("CONTROLMANAGER: Connected to local port! Handing off to handlePair...")
 				// hand off both to handlePair
 				handlePair(done, *pConn, *lConn)
