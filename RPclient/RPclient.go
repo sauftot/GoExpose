@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// These ports are used by GoExpose to communicate between the RPclient and RPserver.
 const (
 	ctrlPort  int = 47921
 	proxyPort int = 47922
