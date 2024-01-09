@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"sync"
 )
 
@@ -14,7 +15,7 @@ type GeClient struct {
 func newRPclient(w *sync.WaitGroup) *GeClient {
 	return &GeClient{
 		locPort: 0,
-		net:     newNetworker(),
+		net:     newNetworker(w),
 		wg:      w,
 	}
 }
@@ -24,12 +25,10 @@ func (c *GeClient) run(stop <-chan bool, input <-chan []string) {
 	for {
 		select {
 		case <-stop:
+			c.net.paired = false
 			return
 		case userIO := <-input:
-			if c.handleInput(userIO) {
-				c.wg.Add(1)
-				go c.net.run(stop)
-			}
+			c.handleInput(userIO)
 		}
 	}
 }
@@ -37,7 +36,7 @@ func (c *GeClient) run(stop <-chan bool, input <-chan []string) {
 /*
 helper function for run, handles user console input
 */
-func (c *GeClient) handleInput(i []string) bool {
+func (c *GeClient) handleInput(i []string) {
 	switch i[0] {
 	case "pair":
 		if len(i) != 2 {
@@ -50,7 +49,6 @@ func (c *GeClient) handleInput(i []string) bool {
 					fmt.Println("ERROR: handleInput: failed to pair with " + i[1] + "!\n" + err.Error())
 				} else {
 					fmt.Println("HANDLEINPUT: Successfully paired with " + i[1] + "!")
-					return true
 				}
 			} else {
 				fmt.Println("ERROR: handleInput: client is already paired to a server!\n Use 'unpair' to unpair from the current server")
@@ -73,8 +71,72 @@ func (c *GeClient) handleInput(i []string) bool {
 			}
 		}
 	case "expose":
-
+		if c.net.paired {
+			if len(i) != 3 {
+				fmt.Println("ERROR: handleInput: invalid number of arguments! use 'expose <tcp/udp> <port>'")
+			} else {
+				p, err := strconv.ParseUint(i[2], 10, 16)
+				if err != nil {
+					fmt.Println("ERROR: handleInput: invalid port number!")
+					return
+				}
+				if p < 8080 || p > 65535 {
+					err = fmt.Errorf("ERROR: handleInput: Please use a Port between 8080 and 65535")
+				} else {
+					port := uint16(p)
+					if i[1] == "tcp" && !c.net.expTCP[port] {
+						err := c.net.exposeTCP(port)
+						if err != nil {
+							fmt.Println("ERROR: handleInput: failed to expose TCP port!" + err.Error())
+							return
+						}
+					} else if i[1] == "udp" && !c.net.expUDP[port] {
+						err := c.net.exposeUDP(port)
+						if err != nil {
+							fmt.Println("ERROR: handleInput: failed to expose UDP port!" + err.Error())
+							return
+						}
+					} else {
+						fmt.Println("ERROR: handleInput: invalid protocol or port already exposed!")
+					}
+				}
+			}
+		} else {
+			fmt.Println("ERROR: handleInput: client is not paired to a server!")
+		}
 	case "hide":
+		if c.net.paired {
+			if len(i) != 3 {
+				fmt.Println("ERROR: handleInput: invalid number of arguments! use 'expose <tcp/udp> <port>'")
+			} else {
+				p, err := strconv.ParseUint(i[2], 10, 16)
+				if err != nil {
+					fmt.Println("ERROR: handleInput: invalid port number!")
+					return
+				}
+				if p < 8080 || p > 65535 {
+					err = fmt.Errorf("ERROR: handleInput: Please use a Port between 8080 and 65535")
+				} else {
+					port := uint16(p)
+					if i[1] == "tcp" && c.net.expTCP[port] {
+						err := c.net.hideTCP(port)
+						if err != nil {
+							fmt.Println("ERROR: handleInput: failed to hide TCP port!" + err.Error())
+							return
+						}
+					} else if i[1] == "udp" && c.net.expUDP[port] {
+						err := c.net.hideUDP(port)
+						if err != nil {
+							fmt.Println("ERROR: handleInput: failed to hide UDP port!" + err.Error())
+							return
+						}
+					} else {
+						fmt.Println("ERROR: handleInput: invalid protocol or port not exposed!")
+					}
+				}
+			}
+		} else {
+			fmt.Println("ERROR: handleInput: client is not paired to a server!")
+		}
 	}
-	return false
 }

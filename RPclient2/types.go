@@ -13,6 +13,7 @@ const (
 	CTRLHIDETCP   = uint8(2)
 	CTRLEXPOSEUDP = uint8(3)
 	CTRLHIDEUDP   = uint8(4)
+	CTRLCONNECT   = uint8(5)
 )
 
 func toByteArray(ctrlFrame *CTRLFrame) ([]byte, error) {

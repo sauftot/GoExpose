@@ -8,10 +8,13 @@ import (
 
 const (
 	CTRLPORT     uint16 = 47921
-	PROXYPORTTCP uint16 = 47922
-	PROXYPORTUDP uint16 = 47923
+	UDPPROXYPORT uint16 = 47922
+	TCPPROXYBASE uint16 = 47923
+	// Set this to the number of tcp ports you want to relay
+	NRTCPPORTS uint16 = 10
 )
 
+// DONE
 func main() {
 	var wg sync.WaitGroup
 
@@ -30,6 +33,7 @@ func main() {
 	wg.Wait()
 }
 
+// DONE
 func consoleInputHandler(stop chan<- bool, input chan<- []string) {
 	var cslString string
 	for {
