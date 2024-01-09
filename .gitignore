@@ -22,3 +22,5 @@ go.work
 .vscode/launch.json
 RPclient/RPclient
 RPserver/RPserver
+
+.idea/*

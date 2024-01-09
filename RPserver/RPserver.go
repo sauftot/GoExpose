@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -138,11 +139,11 @@ func welcome() {
 // consoleController reads from the console and sends a signal to the done channel when the user enters "stop".
 // this is used to shut down the RPserver.
 func consoleController(done chan<- struct{}) {
+	var cslString string
+	fmt.Println("Enter \"stop\" to stop the server.")
 	for {
-		var cslString string
-		fmt.Println("Enter \"stop\" to stop the server.")
 		fmt.Scanln(&cslString)
-		switch cslString {
+		switch strings.ToLower(cslString) {
 		case "stop":
 			fmt.Println("CONSOLECONTROLLER: Received stop command!")
 			close(done)
