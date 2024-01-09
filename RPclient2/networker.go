@@ -199,7 +199,7 @@ func (n *Networker) unpair() error {
 	return nil
 }
 
-// TODO: bridges connection with help of manageCtrl and handoff, continue here
+// DONE
 func (n *Networker) exposeTCP(port uint16) error {
 	portStr := strconv.Itoa(int(port))
 	msg, err := toByteArray(&CTRLFrame{typ: CTRLEXPOSETCP, data: []string{portStr}})
@@ -214,7 +214,7 @@ func (n *Networker) exposeTCP(port uint16) error {
 	return nil
 }
 
-// TODO: implement
+// DONE
 func (n *Networker) hideTCP(port uint16) error {
 	n.expTCP[port] = false
 	return nil

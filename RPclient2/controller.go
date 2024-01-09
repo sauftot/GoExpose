@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -75,30 +76,25 @@ func (c *GeClient) handleInput(i []string) {
 			if len(i) != 3 {
 				fmt.Println("ERROR: handleInput: invalid number of arguments! use 'expose <tcp/udp> <port>'")
 			} else {
-				p, err := strconv.ParseUint(i[2], 10, 16)
+				port, err := checkPort(i[2])
 				if err != nil {
-					fmt.Println("ERROR: handleInput: invalid port number!")
+					fmt.Println("ERROR: handleInput: " + err.Error())
 					return
 				}
-				if p < 8080 || p > 65535 {
-					err = fmt.Errorf("ERROR: handleInput: Please use a Port between 8080 and 65535")
-				} else {
-					port := uint16(p)
-					if i[1] == "tcp" && !c.net.expTCP[port] {
-						err := c.net.exposeTCP(port)
-						if err != nil {
-							fmt.Println("ERROR: handleInput: failed to expose TCP port!" + err.Error())
-							return
-						}
-					} else if i[1] == "udp" && !c.net.expUDP[port] {
-						err := c.net.exposeUDP(port)
-						if err != nil {
-							fmt.Println("ERROR: handleInput: failed to expose UDP port!" + err.Error())
-							return
-						}
-					} else {
-						fmt.Println("ERROR: handleInput: invalid protocol or port already exposed!")
+				if i[1] == "tcp" && !c.net.expTCP[port] {
+					err := c.net.exposeTCP(port)
+					if err != nil {
+						fmt.Println("ERROR: handleInput: failed to expose TCP port!" + err.Error())
+						return
 					}
+				} else if i[1] == "udp" && !c.net.expUDP[port] {
+					err := c.net.exposeUDP(port)
+					if err != nil {
+						fmt.Println("ERROR: handleInput: failed to expose UDP port!" + err.Error())
+						return
+					}
+				} else {
+					fmt.Println("ERROR: handleInput: invalid protocol or port already exposed!")
 				}
 			}
 		} else {
@@ -109,34 +105,42 @@ func (c *GeClient) handleInput(i []string) {
 			if len(i) != 3 {
 				fmt.Println("ERROR: handleInput: invalid number of arguments! use 'expose <tcp/udp> <port>'")
 			} else {
-				p, err := strconv.ParseUint(i[2], 10, 16)
+				port, err := checkPort(i[2])
 				if err != nil {
-					fmt.Println("ERROR: handleInput: invalid port number!")
+					fmt.Println("ERROR: handleInput: " + err.Error())
 					return
 				}
-				if p < 8080 || p > 65535 {
-					err = fmt.Errorf("ERROR: handleInput: Please use a Port between 8080 and 65535")
-				} else {
-					port := uint16(p)
-					if i[1] == "tcp" && c.net.expTCP[port] {
-						err := c.net.hideTCP(port)
-						if err != nil {
-							fmt.Println("ERROR: handleInput: failed to hide TCP port!" + err.Error())
-							return
-						}
-					} else if i[1] == "udp" && c.net.expUDP[port] {
-						err := c.net.hideUDP(port)
-						if err != nil {
-							fmt.Println("ERROR: handleInput: failed to hide UDP port!" + err.Error())
-							return
-						}
-					} else {
-						fmt.Println("ERROR: handleInput: invalid protocol or port not exposed!")
+				if i[1] == "tcp" && c.net.expTCP[port] {
+					err := c.net.hideTCP(port)
+					if err != nil {
+						fmt.Println("ERROR: handleInput: failed to hide TCP port!" + err.Error())
+						return
 					}
+				} else if i[1] == "udp" && c.net.expUDP[port] {
+					err := c.net.hideUDP(port)
+					if err != nil {
+						fmt.Println("ERROR: handleInput: failed to hide UDP port!" + err.Error())
+						return
+					}
+				} else {
+					fmt.Println("ERROR: handleInput: invalid protocol or port not exposed!")
 				}
 			}
 		} else {
 			fmt.Println("ERROR: handleInput: client is not paired to a server!")
 		}
+	}
+}
+
+func checkPort(port string) (uint16, error) {
+	p, err := strconv.ParseUint(port, 10, 16)
+	if err != nil {
+		fmt.Println("ERROR: handleInput: invalid port number!")
+		return 0, errors.New("invalid port number")
+	}
+	if p < 8080 || p > 65535 {
+		return 0, errors.New("invalid port number")
+	} else {
+		return uint16(p), nil
 	}
 }
