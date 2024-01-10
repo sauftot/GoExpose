@@ -169,7 +169,7 @@ func (n *Networker) pair(ip string) error {
 		if buf[0] == 'a' {
 			fmt.Println("PAIR: Received handshake... Sending authentication...")
 			//authentication successful, return connection
-			_, err = conn.Write([]byte("A9os78j8796dfgfmioas87od"))
+			_, err = conn.Write([]byte(frame.TOKEN))
 			if err != nil {
 				return errors.New("PAIR: failed to send authentication byte")
 			}

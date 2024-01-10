@@ -8,18 +8,19 @@ type CTRLFrame struct {
 }
 
 const (
-	CTRLUNPAIR    = uint8(0)
-	CTRLEXPOSETCP = uint8(1)
-	CTRLHIDETCP   = uint8(2)
-	CTRLEXPOSEUDP = uint8(3)
-	CTRLHIDEUDP   = uint8(4)
-	CTRLCONNECT   = uint8(5)
+	CTRLUNPAIR    = uint8(200)
+	CTRLEXPOSETCP = uint8(201)
+	CTRLHIDETCP   = uint8(202)
+	CTRLEXPOSEUDP = uint8(203)
+	CTRLHIDEUDP   = uint8(204)
+	CTRLCONNECT   = uint8(205)
 
 	CTRLPORT     uint16 = 47921
 	UDPPROXYPORT uint16 = 47922
 	TCPPROXYBASE uint16 = 47923
 	// Set this to the number of tcp ports you want to relay
 	NRTCPPORTS uint16 = 10
+	TOKEN             = ""
 )
 
 func ToByteArray(ctrlFrame *CTRLFrame) ([]byte, error) {
