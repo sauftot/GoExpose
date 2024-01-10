@@ -154,7 +154,7 @@ func (n *Networker) handoff(pConn *net.TCPConn, localPort string) {
 // DONE
 func (n *Networker) pair(ip string) error {
 	// attempt to dial RPserver on control port
-	conn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: net.ParseIP(ip), Port: int(CTRLPORT)})
+	conn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: net.ParseIP(ip), Port: int(frame.CTRLPORT)})
 	if err != nil {
 		return errors.New("PAIR: error dialing control port")
 	}

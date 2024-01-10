@@ -14,6 +14,12 @@ const (
 	CTRLEXPOSEUDP = uint8(3)
 	CTRLHIDEUDP   = uint8(4)
 	CTRLCONNECT   = uint8(5)
+
+	CTRLPORT     uint16 = 47921
+	UDPPROXYPORT uint16 = 47922
+	TCPPROXYBASE uint16 = 47923
+	// Set this to the number of tcp ports you want to relay
+	NRTCPPORTS uint16 = 10
 )
 
 func ToByteArray(ctrlFrame *CTRLFrame) ([]byte, error) {

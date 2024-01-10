@@ -12,7 +12,7 @@ type GeClient struct {
 	wg      *sync.WaitGroup
 }
 
-func newRPclient(w *sync.WaitGroup) *GeClient {
+func newGeClient(w *sync.WaitGroup) *GeClient {
 	return &GeClient{
 		locPort: 0,
 		net:     newNetworker(w),
