@@ -1,8 +1,7 @@
 package main
 
 import (
-	"fmt"
-	"strings"
+	"example.com/reverseproxy/pkg/console"
 	"sync"
 )
 
@@ -28,30 +27,7 @@ func main() {
 	wg.Add(1)
 	c := newRPclient(&wg)
 	go c.run(stop, input)
-	go consoleInputHandler(stop, input)
+	go console.InputHandler(stop, input)
 
 	wg.Wait()
-}
-
-// DONE
-func consoleInputHandler(stop chan<- bool, input chan<- []string) {
-	var cslString string
-	for {
-		_, err := fmt.Scanln(&cslString)
-		if err != nil {
-			fmt.Println("CONSOLECONTROLLER: Couldn't read from console!")
-			stop <- true
-			return
-		}
-		cslString = strings.ToLower(cslString)
-		tokens := strings.Split(cslString, " ")
-		switch tokens[0] {
-		case "exit":
-			fmt.Println("CONSOLECONTROLLER: Received stop command!")
-			stop <- true
-			return
-		default:
-			input <- tokens
-		}
-	}
 }

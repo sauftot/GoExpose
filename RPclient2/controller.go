@@ -1,9 +1,8 @@
 package main
 
 import (
-	"errors"
+	"example.com/reverseproxy/pkg/console"
 	"fmt"
-	"strconv"
 	"sync"
 )
 
@@ -76,7 +75,7 @@ func (c *GeClient) handleInput(i []string) {
 			if len(i) != 3 {
 				fmt.Println("ERROR: handleInput: invalid number of arguments! use 'expose <tcp/udp> <port>'")
 			} else {
-				port, err := checkPort(i[2])
+				port, err := console.CheckPort(i[2])
 				if err != nil {
 					fmt.Println("ERROR: handleInput: " + err.Error())
 					return
@@ -105,7 +104,7 @@ func (c *GeClient) handleInput(i []string) {
 			if len(i) != 3 {
 				fmt.Println("ERROR: handleInput: invalid number of arguments! use 'expose <tcp/udp> <port>'")
 			} else {
-				port, err := checkPort(i[2])
+				port, err := console.CheckPort(i[2])
 				if err != nil {
 					fmt.Println("ERROR: handleInput: " + err.Error())
 					return
@@ -129,18 +128,5 @@ func (c *GeClient) handleInput(i []string) {
 		} else {
 			fmt.Println("ERROR: handleInput: client is not paired to a server!")
 		}
-	}
-}
-
-func checkPort(port string) (uint16, error) {
-	p, err := strconv.ParseUint(port, 10, 16)
-	if err != nil {
-		fmt.Println("ERROR: handleInput: invalid port number!")
-		return 0, errors.New("invalid port number")
-	}
-	if p < 8080 || p > 65535 {
-		return 0, errors.New("invalid port number")
-	} else {
-		return uint16(p), nil
 	}
 }

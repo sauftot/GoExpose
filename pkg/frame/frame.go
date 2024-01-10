@@ -1,10 +1,10 @@
-package main
+package frame
 
 import "encoding/json"
 
 type CTRLFrame struct {
-	typ  byte
-	data []string
+	Typ  byte
+	Data []string
 }
 
 const (
@@ -16,7 +16,7 @@ const (
 	CTRLCONNECT   = uint8(5)
 )
 
-func toByteArray(ctrlFrame *CTRLFrame) ([]byte, error) {
+func ToByteArray(ctrlFrame *CTRLFrame) ([]byte, error) {
 	jsonBytes, err := json.Marshal(ctrlFrame)
 	if err != nil {
 		return nil, err
@@ -24,7 +24,7 @@ func toByteArray(ctrlFrame *CTRLFrame) ([]byte, error) {
 	return jsonBytes, nil
 }
 
-func fromByteArray(jsonBytes []byte) (*CTRLFrame, error) {
+func FromByteArray(jsonBytes []byte) (*CTRLFrame, error) {
 	ctrlFrame := &CTRLFrame{}
 	err := json.Unmarshal(jsonBytes, ctrlFrame)
 	if err != nil {
