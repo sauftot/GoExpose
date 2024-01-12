@@ -24,15 +24,16 @@ func newGeServer(wg *sync.WaitGroup) *GeServer {
 	return &GeServer{
 		paired:     false,
 		wg:         wg,
+		netOut:     make(chan *frame.CTRLFrame),
 		proxyPorts: make(map[uint16]bool, 10),
 		expTCP:     make(map[uint16]bool),
 		expUDP:     make(map[uint16]bool),
 	}
 }
 
-func (s *GeServer) run(stop <-chan bool) {
+func (s *GeServer) run(stop <-chan struct{}) {
+	defer s.wg.Done()
 	netIn := make(chan *frame.CTRLFrame)
-	s.netOut = make(chan *frame.CTRLFrame)
 
 	for {
 		select {
@@ -54,18 +55,20 @@ func (s *GeServer) run(stop <-chan bool) {
 	}
 }
 
-func (s *GeServer) connectControl(stop <-chan bool, netIn chan<- *frame.CTRLFrame) {
+func (s *GeServer) connectControl(stop <-chan struct{}, netIn chan<- *frame.CTRLFrame) {
 	l, err := net.ListenTCP("tcp", &net.TCPAddr{Port: int(frame.CTRLPORT)})
 	if err != nil {
 		return
 	}
 	defer l.Close()
-	var conn *net.TCPConn = nil
-	for conn != nil {
+	var conn *net.TCPConn
+
+	for !s.paired {
 		select {
 		case <-stop:
 			return
 		default:
+			fmt.Println("Trying to accept connection...")
 			l.SetDeadline(time.Now().Add(1 * time.Second))
 			conn, err = l.AcceptTCP()
 			if opErr := err.(*net.OpError); opErr.Timeout() {
@@ -78,21 +81,25 @@ func (s *GeServer) connectControl(stop <-chan bool, netIn chan<- *frame.CTRLFram
 				conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 				var buf []byte
 				_, err = conn.Read(buf)
-				if err != nil && strings.Compare(string(buf), frame.TOKEN) == 0 {
-					conn.Close()
-					conn = nil
+				if err == nil && strings.Compare(string(buf), frame.TOKEN) == 0 {
+					s.paired = true
 				}
 			}
 		}
 	}
-	s.paired = true
+	fmt.Println("Paired!")
 	s.wg.Add(1)
 	go s.controlHandler(conn, netIn)
 	return
 }
 
 func (s *GeServer) controlHandler(conn *net.TCPConn, netIn chan<- *frame.CTRLFrame) {
-	defer conn.Close()
+	defer func(conn *net.TCPConn) {
+		err := conn.Close()
+		if err != nil {
+			panic(err)
+		}
+	}(conn)
 	defer s.wg.Done()
 
 	s.wg.Add(1)

@@ -7,13 +7,13 @@ import (
 	"strings"
 )
 
-func InputHandler(stop chan<- bool, input chan<- []string) {
+func InputHandler(stop chan<- struct{}, input chan<- []string) {
 	var cslString string
 	for {
 		_, err := fmt.Scanln(&cslString)
 		if err != nil {
-			fmt.Println("CONSOLECONTROLLER: Couldn't read from console!")
-			stop <- true
+			close(stop)
+			panic("CONSOLECONTROLLER: Couldn't read from console: " + err.Error())
 			return
 		}
 		cslString = strings.ToLower(cslString)
@@ -21,7 +21,7 @@ func InputHandler(stop chan<- bool, input chan<- []string) {
 		switch tokens[0] {
 		case "exit":
 			fmt.Println("CONSOLECONTROLLER: Received stop command!")
-			stop <- true
+			close(stop)
 			return
 		default:
 			input <- tokens
@@ -29,13 +29,13 @@ func InputHandler(stop chan<- bool, input chan<- []string) {
 	}
 }
 
-func StopHandler(stop chan<- bool) {
+func StopHandler(stop chan<- struct{}) {
 	var cslString string
 	for {
 		_, err := fmt.Scanln(&cslString)
 		if err != nil {
 			fmt.Println("CONSOLECONTROLLER: Couldn't read from console!")
-			stop <- true
+			close(stop)
 			return
 		}
 		cslString = strings.ToLower(cslString)
@@ -43,7 +43,7 @@ func StopHandler(stop chan<- bool) {
 		switch tokens[0] {
 		case "exit":
 			fmt.Println("CONSOLECONTROLLER: Received stop command!")
-			stop <- true
+			close(stop)
 			return
 		}
 	}
