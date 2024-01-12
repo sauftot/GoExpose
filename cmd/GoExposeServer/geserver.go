@@ -214,16 +214,50 @@ func (s *GeServer) tcpProxy(port uint16) {
 		if netErr := err.(net.Error); netErr.Timeout() {
 			continue
 		} else if err != nil {
-			panic(err)
-		} else {
+			panic("ERROR: tcpProxy: " + err.Error())
+		}
 
 		lProxy, err := net.ListenTCP("tcp", &net.TCPAddr{Port: int(proxyPort)})
 		if err != nil {
 			panic("ERROR: tcpProxy: " + err.Error())
 		}
+
+		s.netOut <- &frame.CTRLFrame{Typ: frame.CTRLCONNECT, Data: []string{strconv.Itoa(int(proxyPort)), strconv.Itoa(int(port))}}
+		lProxy.SetDeadline(time.Now().Add(2 * time.Second))
+		cProxy, err := lProxy.AcceptTCP()
+		if err != nil {
+			panic("ERROR: tcpProxy: " + err.Error())
+		} else {
+			s.wg.Add(1)
+			go s.tcpRelay(cExternal, cProxy, port)
+			s.wg.Add(1)
+			go s.tcpRelay(cProxy, cExternal, port)
+		}
+		lProxy.Close()
 	}
 }
 
-func (s *GeServer) tcpRelay() {
+func (s *GeServer) tcpRelay(src, dst *net.TCPConn, port uint16) {
+	defer src.Close()
+	defer dst.Close()
+	defer s.wg.Done()
 
+	buf := make([]byte, 2048)
+	for s.paired && s.expTCP[port] {
+		src.SetReadDeadline(time.Now().Add(1 * time.Second))
+		n, err := src.Read(buf)
+		if netErr := err.(net.Error); netErr.Timeout() {
+			continue
+		} else if err != nil {
+			fmt.Println("ERROR: tcpRelay: " + err.Error())
+			return
+		} else {
+			_, err = dst.Write(buf[:n])
+			if err != nil {
+				fmt.Println("ERROR: tcpRelay: " + err.Error())
+				return
+			}
+			buf = []byte{}
+		}
+	}
 }
