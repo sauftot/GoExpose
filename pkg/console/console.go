@@ -1,23 +1,25 @@
 package console
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 )
 
 func InputHandler(stop chan<- struct{}, input chan<- []string) {
-	var cslString string
+	reader := bufio.NewReader(os.Stdin)
 	for {
-		_, err := fmt.Scanln(&cslString)
+		cslString, err := reader.ReadString('\n')
 		if err != nil {
-			close(stop)
-			panic("CONSOLECONTROLLER: Couldn't read from console: " + err.Error())
+			fmt.Println("Error reading input:", err)
 			return
 		}
-		cslString = strings.ToLower(cslString)
-		tokens := strings.Split(cslString, " ")
+		lower := strings.ToLower(cslString)
+		trimmed := strings.Trim(lower, " \n")
+		tokens := strings.Split(trimmed, " ")
 		switch tokens[0] {
 		case "exit":
 			fmt.Println("CONSOLECONTROLLER: Received stop command!")

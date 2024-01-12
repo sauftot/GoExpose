@@ -20,7 +20,7 @@ func newGeClient(w *sync.WaitGroup) *GeClient {
 	}
 }
 
-func (c *GeClient) run(stop <-chan bool, input <-chan []string) {
+func (c *GeClient) run(stop <-chan struct{}, input <-chan []string) {
 	defer c.wg.Done()
 	for {
 		select {

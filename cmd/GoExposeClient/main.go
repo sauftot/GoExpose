@@ -2,6 +2,7 @@ package main
 
 import (
 	"example.com/reverseproxy/pkg/console"
+	"fmt"
 	"sync"
 )
 
@@ -9,17 +10,18 @@ import (
 func main() {
 	var wg sync.WaitGroup
 
-	stop := make(chan bool)
+	stop := make(chan struct{})
 	input := make(chan []string)
-	defer func(stop chan<- bool, input chan<- []string) {
-		close(stop)
-		close(input)
-	}(stop, input)
+	defer close(input)
 
+	go console.InputHandler(stop, input)
 	wg.Add(1)
 	c := newGeClient(&wg)
 	go c.run(stop, input)
-	go console.InputHandler(stop, input)
 
 	wg.Wait()
+	if _, err := <-stop; err {
+		close(stop)
+	}
+	fmt.Println("MAIN: TERMINATING!")
 }

@@ -71,11 +71,13 @@ func (s *GeServer) connectControl(stop <-chan struct{}, netIn chan<- *frame.CTRL
 			fmt.Println("Trying to accept connection...")
 			l.SetDeadline(time.Now().Add(1 * time.Second))
 			conn, err = l.AcceptTCP()
-			if opErr := err.(*net.OpError); opErr.Timeout() {
-				continue
-			} else if err != nil {
-				fmt.Println("ERROR: connectControl: " + err.Error())
-				return
+			if err != nil {
+				if opErr := err.(*net.OpError); opErr.Timeout() {
+					continue
+				} else {
+					fmt.Println("ERROR: connectControl: " + err.Error())
+					return
+				}
 			} else {
 				conn.Write([]byte("a"))
 				conn.SetReadDeadline(time.Now().Add(1 * time.Second))
@@ -94,12 +96,7 @@ func (s *GeServer) connectControl(stop <-chan struct{}, netIn chan<- *frame.CTRL
 }
 
 func (s *GeServer) controlHandler(conn *net.TCPConn, netIn chan<- *frame.CTRLFrame) {
-	defer func(conn *net.TCPConn) {
-		err := conn.Close()
-		if err != nil {
-			panic(err)
-		}
-	}(conn)
+	defer conn.Close()
 	defer s.wg.Done()
 
 	s.wg.Add(1)
@@ -109,14 +106,16 @@ func (s *GeServer) controlHandler(conn *net.TCPConn, netIn chan<- *frame.CTRLFra
 		var buf []byte
 		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 		_, err := conn.Read(buf)
-		if netErr := err.(net.Error); netErr.Timeout() {
-			// healthy timeout
-			continue
-		} else if err != nil {
-			fmt.Println("ERROR: controlHandler: " + err.Error())
-			fmt.Println("Unpairing...")
-			s.paired = false
-			return
+		if err != nil {
+			if netErr := err.(net.Error); netErr.Timeout() {
+				// healthy timeout
+				continue
+			} else {
+				fmt.Println("ERROR: controlHandler: " + err.Error())
+				fmt.Println("Unpairing...")
+				s.paired = false
+				return
+			}
 		} else {
 			fr, err := frame.FromByteArray(buf)
 			if err != nil {
@@ -146,6 +145,7 @@ func (s *GeServer) netOutHandler(conn *net.TCPConn) {
 	for s.paired {
 		select {
 		case fr := <-s.netOut:
+			fmt.Println("Sending frame to client...")
 			jsonBytes, err := frame.ToByteArray(fr)
 			if err != nil {
 				return
@@ -223,10 +223,12 @@ func (s *GeServer) tcpProxy(port uint16) {
 	for s.paired && s.expTCP[port] {
 		lExternal.SetDeadline(time.Now().Add(500 * time.Millisecond))
 		cExternal, err := lExternal.AcceptTCP()
-		if netErr := err.(net.Error); netErr.Timeout() {
-			continue
-		} else if err != nil {
-			panic("ERROR: tcpProxy: " + err.Error())
+		if err != nil {
+			if netErr := err.(net.Error); netErr.Timeout() {
+				continue
+			} else if err != nil {
+				panic("ERROR: tcpProxy: " + err.Error())
+			}
 		}
 
 		lProxy, err := net.ListenTCP("tcp", &net.TCPAddr{Port: int(proxyPort)})
@@ -258,11 +260,13 @@ func (s *GeServer) tcpRelay(src, dst *net.TCPConn, port uint16) {
 	for s.paired && s.expTCP[port] {
 		src.SetReadDeadline(time.Now().Add(1 * time.Second))
 		n, err := src.Read(buf)
-		if netErr := err.(net.Error); netErr.Timeout() {
-			continue
-		} else if err != nil {
-			fmt.Println("ERROR: tcpRelay: " + err.Error())
-			return
+		if err != nil {
+			if netErr := err.(net.Error); netErr.Timeout() {
+				continue
+			} else {
+				fmt.Println("ERROR: tcpRelay: " + err.Error())
+				return
+			}
 		} else {
 			_, err = dst.Write(buf[:n])
 			if err != nil {
