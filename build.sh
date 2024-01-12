@@ -1,7 +1,7 @@
-cd RPserver
-env GOOS=linux go build -o RPserver
+cd cmd/GoExposeServer
+env GOOS=linux go build -o main
 chmod +x RPserver
-cd ../RPclient
-env GOOS=linux go build -o RPclient
+cd ../GoExposeClient
+env GOOS=linux go build -o main
 chmod +x RPclient
-cd ..
+cd ../..

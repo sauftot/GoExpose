@@ -24,3 +24,5 @@ RPclient/RPclient
 RPserver/RPserver
 
 .idea/*
+
+bin/*
