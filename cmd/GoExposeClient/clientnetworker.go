@@ -156,7 +156,12 @@ func (n *Networker) handoff(pConn *net.TCPConn, localPort string) {
 // DONE
 func (n *Networker) pair(ip string) error {
 	// attempt to dial RPserver on control port
-	conn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: net.ParseIP(ip), Port: int(frame.CTRLPORT)})
+	addr, err := net.ResolveTCPAddr("tcp", ip+":"+strconv.Itoa(int(frame.CTRLPORT)))
+	if err != nil {
+		return errors.New("PAIR: error resolving ip address")
+	}
+
+	conn, err := net.DialTCP("tcp", nil, addr)
 	if err != nil {
 		return errors.New("PAIR: error dialing control port")
 	}

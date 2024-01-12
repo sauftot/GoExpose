@@ -120,6 +120,11 @@ func (s *GeServer) controlHandler(conn *net.TCPConn, netIn chan<- *frame.CTRLFra
 			} else {
 				if fr.Typ == frame.CTRLUNPAIR {
 					s.paired = false
+					for i, proxy := range s.proxyPorts {
+						if proxy {
+							s.proxyPorts[i] = false
+						}
+					}
 					return
 				} else {
 					netIn <- fr
