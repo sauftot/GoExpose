@@ -5,25 +5,28 @@ import (
 	"example.com/reverseproxy/pkg/frame"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
 type GeServer struct {
-	paired bool
-	wg     *sync.WaitGroup
-	netOut chan *frame.CTRLFrame
-	expTCP map[uint16]bool
-	expUDP map[uint16]bool
+	paired     bool
+	wg         *sync.WaitGroup
+	netOut     chan *frame.CTRLFrame
+	proxyPorts map[uint16]bool
+	expTCP     map[uint16]bool
+	expUDP     map[uint16]bool
 }
 
 func newGeServer(wg *sync.WaitGroup) *GeServer {
 	return &GeServer{
-		paired: false,
-		wg:     wg,
-		expTCP: make(map[uint16]bool),
-		expUDP: make(map[uint16]bool),
+		paired:     false,
+		wg:         wg,
+		proxyPorts: make(map[uint16]bool, 10),
+		expTCP:     make(map[uint16]bool),
+		expUDP:     make(map[uint16]bool),
 	}
 }
 
@@ -156,15 +159,71 @@ func (s *GeServer) handleControlFrame(fr *frame.CTRLFrame) {
 		if !s.expTCP[port] {
 			s.expTCP[port] = true
 			s.wg.Add(1)
-			// TODO: check if a proxy port is available
-			// TODO: hand off the proxy port and the port to expose to a new tcp proxy
-
+			go s.tcpProxy(port)
 		}
 	case frame.CTRLHIDETCP:
-		// TODO: implement
+		port, err := console.CheckPort(fr.Data[0])
+		if err != nil {
+			return
+		}
+		if s.expTCP[port] {
+			s.expTCP[port] = false
+		}
 	case frame.CTRLEXPOSEUDP:
 		// TODO: implement
 	case frame.CTRLHIDEUDP:
 		// TODO: implement
 	}
+}
+
+func (s *GeServer) tcpProxy(port uint16) {
+	/*
+		TODO: check which proxy port is available, create a listener
+		TODO: create a listener on the specified port
+		TODO: when an external connection arrives:
+			TODO: send the proxy port to the client using CTRLCONNECT over the control channel
+			TODO: accept a connection on the proyx port with timeout
+			TODO: hand off the two connections to a tcpRelay
+	*/
+	var proxyPort uint16 = 65535
+	for i, proxy := range s.proxyPorts {
+		if !proxy {
+			s.proxyPorts[i] = true
+			proxyPort = i
+		}
+	}
+	if proxyPort == 65535 {
+		fmt.Println("ERROR: tcpProxy: no proxy ports available, telling client")
+		s.netOut <- &frame.CTRLFrame{
+			Typ:  frame.CTRLHIDETCP,
+			Data: []string{strconv.Itoa(int(port))},
+		}
+		return
+	}
+	proxyPort = frame.TCPPROXYBASE + proxyPort
+
+	lExternal, err := net.ListenTCP("tcp", &net.TCPAddr{Port: int(port)})
+	if err != nil {
+		panic("ERROR: tcpProxy: " + err.Error())
+	}
+	defer lExternal.Close()
+
+	for s.paired && s.expTCP[port] {
+		lExternal.SetDeadline(time.Now().Add(500 * time.Millisecond))
+		cExternal, err := lExternal.AcceptTCP()
+		if netErr := err.(net.Error); netErr.Timeout() {
+			continue
+		} else if err != nil {
+			panic(err)
+		} else {
+
+		lProxy, err := net.ListenTCP("tcp", &net.TCPAddr{Port: int(proxyPort)})
+		if err != nil {
+			panic("ERROR: tcpProxy: " + err.Error())
+		}
+	}
+}
+
+func (s *GeServer) tcpRelay() {
+
 }

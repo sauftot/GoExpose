@@ -71,6 +71,8 @@ func (n *Networker) manageCtrl() {
 						continue
 					}
 					n.handoff(toProxy, fr.Data[1])
+				case frame.CTRLHIDETCP:
+					//TODO: received after client send exposetcp but server cant expose any more tcp ports. client should hide the port
 				}
 			}
 		}
