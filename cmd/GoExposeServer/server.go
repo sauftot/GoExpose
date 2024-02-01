@@ -37,6 +37,7 @@ func (s *Server) run() {
 		case <-stop:
 			return
 		default:
+			s.state.CleanUp()
 			conn := s.waitForCtrlConnection()
 			if conn != nil {
 				// Run a goroutine that will handle all writes to the ctrl connection
@@ -127,12 +128,13 @@ func (s *Server) waitForCtrlConnection() net.Conn {
 		return nil
 	}
 	logger.Log("Client connected: " + conn.RemoteAddr().String())
+	s.state.PairedIP = conn.RemoteAddr()
 	return conn
 }
 
 func (s *Server) manageCtrlConnectionOutgoing(conn net.Conn) {
 	defer wg.Done()
-
+	s.state.NetOut = make(chan *frame.CTRLFrame, 100)
 	for {
 		select {
 		case <-stop:
@@ -145,6 +147,9 @@ func (s *Server) manageCtrlConnectionOutgoing(conn net.Conn) {
 				if err != nil {
 					logger.Error("Error writing frame:", err)
 					return
+				}
+				if fr.Typ == frame.CTRLUNPAIR {
+					s.state.NetOut = make(chan *frame.CTRLFrame, 100)
 				}
 			}
 		}
