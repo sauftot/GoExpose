@@ -90,14 +90,14 @@ func (s *Server) waitForCtrlConnection() net.Conn {
 		logger.Error("Error TLS listening:", err)
 		return nil
 	}
-	defer func(l *net.Listener) {
+	defer func(l net.Listener) {
 		logger.Log("Closing TLS listener")
-		err := (*l).Close()
+		err := (l).Close()
 		if err != nil {
 			return
 		}
 		return
-	}(&l)
+	}(l)
 	stopCauseAccept := make(chan struct{})
 	defer close(stopCauseAccept)
 
