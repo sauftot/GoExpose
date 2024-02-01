@@ -3,10 +3,7 @@ package main
 import (
 	"example.com/reverseproxy/pkg/console"
 	mylog "example.com/reverseproxy/pkg/logger"
-	"os"
-	"os/signal"
 	"sync"
-	"syscall"
 )
 
 var wg sync.WaitGroup
@@ -21,9 +18,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
 	stop := make(chan struct{})
 	go console.StopHandler(stop)
