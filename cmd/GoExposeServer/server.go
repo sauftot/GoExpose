@@ -126,7 +126,7 @@ func (s *Server) waitForCtrlConnection() net.Conn {
 		logger.Error("Error accepting connection:", err)
 		return nil
 	}
-	logger.Log("Client connected")
+	logger.Log("Client connected: " + conn.RemoteAddr().String())
 	return conn
 }
 
