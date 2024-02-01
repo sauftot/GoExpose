@@ -2,23 +2,38 @@ package main
 
 import (
 	"example.com/reverseproxy/pkg/console"
-	"fmt"
+	mylog "example.com/reverseproxy/pkg/logger"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 )
+
+var wg sync.WaitGroup
+var logger *mylog.Logger
+var debuglevel = mylog.DEBUG
+var stop chan struct{}
 
 // DONE
 func main() {
-	var wg sync.WaitGroup
+	logger, err := mylog.NewLogger("Server")
+	logger.SetLogLevel(debuglevel)
+	if err != nil {
+		panic(err)
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+
 	stop := make(chan struct{})
 	go console.StopHandler(stop)
-
+	server := NewServer()
 	wg.Add(1)
-	s := newGeServer(&wg)
-	go s.run(stop)
+	go server.run()
 
 	wg.Wait()
 	if _, err := <-stop; err {
 		close(stop)
 	}
-	fmt.Println("MAIN: TERMINATING!")
+	logger.Log("GoExposeServer stopped")
 }

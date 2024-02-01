@@ -1,10 +1,15 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"example.com/reverseproxy/pkg/console"
 	"example.com/reverseproxy/pkg/frame"
 	"fmt"
+	"log/slog"
 	"net"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,17 +18,15 @@ import (
 
 type GeServer struct {
 	paired     bool
-	wg         *sync.WaitGroup
 	netOut     chan *frame.CTRLFrame
 	proxyPorts map[uint16]bool
 	expTCP     map[uint16]bool
 	expUDP     map[uint16]bool
 }
 
-func newGeServer(wg *sync.WaitGroup) *GeServer {
+func newGeServer(wg *sync.WaitGroup, logger *slog.Logger) *GeServer {
 	return &GeServer{
 		paired:     false,
-		wg:         wg,
 		netOut:     make(chan *frame.CTRLFrame),
 		proxyPorts: make(map[uint16]bool, 10),
 		expTCP:     make(map[uint16]bool),
@@ -33,6 +36,13 @@ func newGeServer(wg *sync.WaitGroup) *GeServer {
 
 func (s *GeServer) run(stop <-chan struct{}) {
 	defer s.wg.Done()
+
+	config := s.prepareTlsConfig()
+	if config == nil {
+		s.logger.Error("Error preparing TLS config.")
+		return
+	}
+
 	netIn := make(chan *frame.CTRLFrame)
 
 	for {
@@ -41,7 +51,7 @@ func (s *GeServer) run(stop <-chan struct{}) {
 			s.paired = false
 			return
 		default:
-			s.connectControl(stop, netIn)
+			s.connectControl(stop, netIn, config)
 			for s.paired {
 				select {
 				case <-stop:
@@ -55,12 +65,19 @@ func (s *GeServer) run(stop <-chan struct{}) {
 	}
 }
 
-func (s *GeServer) connectControl(stop <-chan struct{}, netIn chan<- *frame.CTRLFrame) {
-	l, err := net.ListenTCP("tcp", &net.TCPAddr{Port: int(frame.CTRLPORT)})
+func (s *GeServer) connectControl(stop <-chan struct{}, netIn chan<- *frame.CTRLFrame, config *tls.Config) {
+
+	l, err := tls.Listen("tcp", ":"+strconv.Itoa(int(CTRLPORT)), config)
 	if err != nil {
 		return
 	}
-	defer l.Close()
+	l := la.(*net.TCPListener)
+	defer func(l *net.TCPListener) {
+		err := l.Close()
+		if err != nil {
+
+		}
+	}(l)
 	var conn *net.TCPConn
 
 	for !s.paired {
@@ -69,7 +86,10 @@ func (s *GeServer) connectControl(stop <-chan struct{}, netIn chan<- *frame.CTRL
 			return
 		default:
 			fmt.Println("Trying to accept connection...")
-			l.SetDeadline(time.Now().Add(1 * time.Second))
+			err = l.SetDeadline(time.Now().Add(1 * time.Second))
+			if err != nil {
+				return
+			}
 			conn, err = l.AcceptTCP()
 			if err != nil {
 				if opErr := err.(*net.OpError); opErr.Timeout() {
@@ -79,8 +99,14 @@ func (s *GeServer) connectControl(stop <-chan struct{}, netIn chan<- *frame.CTRL
 					return
 				}
 			} else {
-				conn.Write([]byte("a"))
-				conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+				_, err := conn.Write([]byte("a"))
+				if err != nil {
+					return
+				}
+				err = conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+				if err != nil {
+					return
+				}
 				var buf []byte
 				_, err = conn.Read(buf)
 				if err == nil && strings.Compare(string(buf), frame.TOKEN) == 0 {
@@ -96,7 +122,12 @@ func (s *GeServer) connectControl(stop <-chan struct{}, netIn chan<- *frame.CTRL
 }
 
 func (s *GeServer) controlHandler(conn *net.TCPConn, netIn chan<- *frame.CTRLFrame) {
-	defer conn.Close()
+	defer func(conn *net.TCPConn) {
+		err := conn.Close()
+		if err != nil {
+
+		}
+	}(conn)
 	defer s.wg.Done()
 
 	s.wg.Add(1)
@@ -104,8 +135,11 @@ func (s *GeServer) controlHandler(conn *net.TCPConn, netIn chan<- *frame.CTRLFra
 
 	for s.paired {
 		var buf []byte
-		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-		_, err := conn.Read(buf)
+		err := conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		if err != nil {
+			return
+		}
+		_, err = conn.Read(buf)
 		if err != nil {
 			if netErr := err.(net.Error); netErr.Timeout() {
 				// healthy timeout
@@ -189,14 +223,6 @@ func (s *GeServer) handleControlFrame(fr *frame.CTRLFrame) {
 }
 
 func (s *GeServer) tcpProxy(port uint16) {
-	/*
-		TODO: check which proxy port is available, create a listener
-		TODO: create a listener on the specified port
-		TODO: when an external connection arrives:
-			TODO: send the proxy port to the client using CTRLCONNECT over the control channel
-			TODO: accept a connection on the proyx port with timeout
-			TODO: hand off the two connections to a tcpRelay
-	*/
 	var proxyPort uint16 = 65535
 	for i, proxy := range s.proxyPorts {
 		if !proxy {
@@ -218,10 +244,18 @@ func (s *GeServer) tcpProxy(port uint16) {
 	if err != nil {
 		panic("ERROR: tcpProxy: " + err.Error())
 	}
-	defer lExternal.Close()
+	defer func(lExternal *net.TCPListener) {
+		err := lExternal.Close()
+		if err != nil {
+
+		}
+	}(lExternal)
 
 	for s.paired && s.expTCP[port] {
-		lExternal.SetDeadline(time.Now().Add(500 * time.Millisecond))
+		err = lExternal.SetDeadline(time.Now().Add(500 * time.Millisecond))
+		if err != nil {
+			return
+		}
 		cExternal, err := lExternal.AcceptTCP()
 		if err != nil {
 			if netErr := err.(net.Error); netErr.Timeout() {
@@ -237,7 +271,10 @@ func (s *GeServer) tcpProxy(port uint16) {
 		}
 
 		s.netOut <- &frame.CTRLFrame{Typ: frame.CTRLCONNECT, Data: []string{strconv.Itoa(int(proxyPort)), strconv.Itoa(int(port))}}
-		lProxy.SetDeadline(time.Now().Add(2 * time.Second))
+		err = lProxy.SetDeadline(time.Now().Add(2 * time.Second))
+		if err != nil {
+			return
+		}
 		cProxy, err := lProxy.AcceptTCP()
 		if err != nil {
 			panic("ERROR: tcpProxy: " + err.Error())
@@ -247,18 +284,34 @@ func (s *GeServer) tcpProxy(port uint16) {
 			s.wg.Add(1)
 			go s.tcpRelay(cProxy, cExternal, port)
 		}
-		lProxy.Close()
+		err = lProxy.Close()
+		if err != nil {
+			return
+		}
 	}
 }
 
 func (s *GeServer) tcpRelay(src, dst *net.TCPConn, port uint16) {
-	defer src.Close()
-	defer dst.Close()
+	defer func(src *net.TCPConn) {
+		err := src.Close()
+		if err != nil {
+
+		}
+	}(src)
+	defer func(dst *net.TCPConn) {
+		err := dst.Close()
+		if err != nil {
+
+		}
+	}(dst)
 	defer s.wg.Done()
 
 	buf := make([]byte, 2048)
 	for s.paired && s.expTCP[port] {
-		src.SetReadDeadline(time.Now().Add(1 * time.Second))
+		err := src.SetReadDeadline(time.Now().Add(1 * time.Second))
+		if err != nil {
+			return
+		}
 		n, err := src.Read(buf)
 		if err != nil {
 			if netErr := err.(net.Error); netErr.Timeout() {
@@ -276,4 +329,39 @@ func (s *GeServer) tcpRelay(src, dst *net.TCPConn, port uint16) {
 			buf = []byte{}
 		}
 	}
+}
+
+func (s *GeServer) prepareTlsConfig() *tls.Config {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		s.logger.Error("Error getting home directory:", err)
+		return nil
+	}
+	filePath := filepath.Join(homeDir, "certs", "myCA.pem")
+	caCertData, err := os.ReadFile(filePath)
+	if err != nil {
+		s.logger.Error("Error reading CA certificate:", err)
+		return nil
+	}
+
+	caCertPool := x509.NewCertPool()
+	ok := caCertPool.AppendCertsFromPEM(caCertData)
+	if !ok {
+		s.logger.Error("Error appending CA certificate to pool.")
+		return nil
+	}
+	keyPath := filepath.Join(homeDir, "certs", "server.key")
+	crtPath := filepath.Join(homeDir, "certs", "server.crt")
+	cer, err := tls.LoadX509KeyPair(crtPath, keyPath)
+	if err != nil {
+		s.logger.Error("Error loading key pair:", err)
+		return nil
+	}
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cer},
+		ClientCAs:    caCertPool,
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+	}
+	return tlsConfig
 }

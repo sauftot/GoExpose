@@ -1,11 +1,9 @@
 package frame
 
-import "encoding/json"
-
-type CTRLFrame struct {
-	Typ  byte
-	Data []string
-}
+import (
+	"encoding/json"
+	"net"
+)
 
 const (
 	CTRLUNPAIR    = uint8(200)
@@ -14,14 +12,20 @@ const (
 	CTRLEXPOSEUDP = uint8(203)
 	CTRLHIDEUDP   = uint8(204)
 	CTRLCONNECT   = uint8(205)
-
-	CTRLPORT     uint16 = 47921
-	UDPPROXYPORT uint16 = 47922
-	TCPPROXYBASE uint16 = 47923
-	// Set this to the number of tcp ports you want to relay
-	NRTCPPORTS uint16 = 10
-	TOKEN             = ""
+	STOP          = uint8(0)
 )
+
+type CTRLFrame struct {
+	Typ  byte
+	Data []string
+}
+
+func NewCTRLFrame(typ byte, data []string) *CTRLFrame {
+	return &CTRLFrame{
+		Typ:  typ,
+		Data: data,
+	}
+}
 
 func ToByteArray(ctrlFrame *CTRLFrame) ([]byte, error) {
 	jsonBytes, err := json.Marshal(ctrlFrame)
@@ -38,4 +42,29 @@ func FromByteArray(jsonBytes []byte) (*CTRLFrame, error) {
 		return nil, err
 	}
 	return ctrlFrame, nil
+}
+
+func ReadFrame(conn net.Conn) (*CTRLFrame, error) {
+	buf := make([]byte, 1024)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return nil, err
+	}
+	fr, err := FromByteArray(buf[:n])
+	if err != nil {
+		return nil, err
+	}
+	return fr, nil
+}
+
+func WriteFrame(conn net.Conn, fr *CTRLFrame) error {
+	jsonBytes, err := ToByteArray(fr)
+	if err != nil {
+		return err
+	}
+	_, err = conn.Write(jsonBytes)
+	if err != nil {
+		return err
+	}
+	return nil
 }
