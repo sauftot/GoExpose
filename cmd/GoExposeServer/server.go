@@ -12,9 +12,7 @@ import (
 
 const (
 	CTRLPORT     int = 47921
-	UDPPROXYPORT int = 47922
 	TCPPROXYBASE int = 47923
-	NRTCPPORTS   int = 10
 )
 
 type Server struct {

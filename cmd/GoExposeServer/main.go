@@ -8,18 +8,19 @@ import (
 
 var wg sync.WaitGroup
 var logger *mylog.Logger
-var debuglevel = mylog.DEBUG
+var loglevel = mylog.DEBUG
 var stop chan struct{}
 
 // DONE
 func main() {
-	logger, err := mylog.NewLogger("Server")
-	logger.SetLogLevel(debuglevel)
+	var err error
+	logger, err = mylog.NewLogger("Server")
+	logger.SetLogLevel(loglevel)
 	if err != nil {
 		panic(err)
 	}
 
-	stop := make(chan struct{})
+	stop = make(chan struct{})
 	go console.StopHandler(stop)
 	server := NewServer()
 	wg.Add(1)
