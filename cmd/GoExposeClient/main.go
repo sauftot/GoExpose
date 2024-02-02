@@ -20,12 +20,12 @@ func main() {
 	}
 
 	stop = make(chan struct{})
-	input := make(chan []string)
+	input := make(chan []string, 100)
 
 	go console.InputHandler(stop, input)
 	client := NewClient()
 	wg.Add(1)
-	go client.run()
+	go client.run(input)
 
 	wg.Wait()
 	if _, err := <-stop; err {

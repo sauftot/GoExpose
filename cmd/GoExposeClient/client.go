@@ -2,19 +2,41 @@ package main
 
 import (
 	"crypto/tls"
+	"fmt"
 	"os"
 	"path/filepath"
 )
 
+const (
+	CTRLPORT int = 47921
+)
+
 type Client struct {
+	proxy *Proxy
 }
 
 func NewClient() *Client {
-	return &Client{}
+	return &Client{
+		proxy: NewProxy(),
+	}
 }
 
-func (c *Client) run() {
+func (c *Client) run(input chan []string) {
+	config := c.prepareTlsConfig()
+	if config == nil {
+		logger.Error("Error preparing TLS config: ", nil)
+		return
+	}
+	c.proxy.setConfig(config)
 
+	for {
+		select {
+		case <-stop:
+			return
+		case cmd := <-input:
+			c.handleCommand(cmd)
+		}
+	}
 }
 
 func (c *Client) prepareTlsConfig() *tls.Config {
@@ -36,4 +58,27 @@ func (c *Client) prepareTlsConfig() *tls.Config {
 		InsecureSkipVerify: true, // The servers certificate is self-signed, the clients is signed by the server. This should be adjusted in the future
 	}
 	return config
+}
+
+func (c *Client) handleCommand(cmd []string) {
+	switch cmd[0] {
+	case "pair":
+		if c.proxy.Paired {
+			fmt.Println("[ERROR] Already paired!")
+			return
+		}
+		if len(cmd) != 2 {
+			fmt.Println("[ERROR] Invalid Arguments! Use 'pair <server>'")
+			return
+		}
+		c.proxy.connectToServer(cmd[1])
+	case "unpair":
+
+	case "expose":
+
+	case "hide":
+
+	default:
+		fmt.Println("[ERROR] Unknown command: ", cmd[0], " use 'pair', 'unpair', 'expose' or 'hide'.")
+	}
 }
