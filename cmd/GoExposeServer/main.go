@@ -11,7 +11,6 @@ var logger *mylog.Logger
 var loglevel = mylog.DEBUG
 var stop chan struct{}
 
-// DONE
 func main() {
 	var err error
 	logger, err = mylog.NewLogger("Server")

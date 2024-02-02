@@ -16,26 +16,30 @@ const (
 )
 
 type Server struct {
-	state  *State
+	proxy  *Proxy
 	config *tls.Config
 }
 
 func NewServer() *Server {
 	return &Server{
-		state: NewState(),
+		proxy: NewState(),
 	}
 }
 
 func (s *Server) run() {
 	defer wg.Done()
 	s.config = s.prepareTlsConfig()
+	if s.config == nil {
+		logger.Error("Error preparing TLS config:", nil)
+		return
+	}
 
 	for {
 		select {
 		case <-stop:
 			return
 		default:
-			s.state.CleanUp()
+			s.proxy.CleanUp()
 			conn := s.waitForCtrlConnection()
 			if conn != nil {
 				// Run a goroutine that will handle all writes to the ctrl connection
@@ -126,18 +130,18 @@ func (s *Server) waitForCtrlConnection() net.Conn {
 		return nil
 	}
 	logger.Log("Client connected: " + conn.RemoteAddr().String())
-	s.state.PairedIP = conn.RemoteAddr()
+	s.proxy.PairedIP = conn.RemoteAddr()
 	return conn
 }
 
 func (s *Server) manageCtrlConnectionOutgoing(conn net.Conn) {
 	defer wg.Done()
-	s.state.NetOut = make(chan *frame.CTRLFrame, 100)
+	s.proxy.NetOut = make(chan *frame.CTRLFrame, 100)
 	for {
 		select {
 		case <-stop:
 			return
-		case fr := <-s.state.NetOut:
+		case fr := <-s.proxy.NetOut:
 			if fr.Typ == frame.STOP {
 				return
 			} else {
@@ -147,7 +151,7 @@ func (s *Server) manageCtrlConnectionOutgoing(conn net.Conn) {
 					return
 				}
 				if fr.Typ == frame.CTRLUNPAIR {
-					s.state.NetOut = make(chan *frame.CTRLFrame, 100)
+					s.proxy.NetOut = make(chan *frame.CTRLFrame, 100)
 				}
 			}
 		}
@@ -172,9 +176,9 @@ func (s *Server) manageCtrlConnectionIncoming(conn net.Conn) {
 			select {
 			case <-stop:
 				dontClose = false
-				s.state.NetOut <- frame.NewCTRLFrame(frame.CTRLUNPAIR, nil)
+				s.proxy.NetOut <- frame.NewCTRLFrame(frame.CTRLUNPAIR, nil)
 				logger.Log("Closing TLS Conn")
-				s.state.NetOut <- frame.NewCTRLFrame(frame.STOP, nil)
+				s.proxy.NetOut <- frame.NewCTRLFrame(frame.STOP, nil)
 			case <-stopCauseConnDead:
 				dontClose = false
 			}
@@ -187,7 +191,7 @@ func (s *Server) manageCtrlConnectionIncoming(conn net.Conn) {
 		case <-stop:
 			return
 		default:
-			if s.state.Paired {
+			if s.proxy.Paired {
 				s.handleCtrlFrame(conn)
 			} else {
 				return
@@ -200,25 +204,25 @@ func (s *Server) handleCtrlFrame(conn net.Conn) {
 	fr, err := frame.ReadFrame(conn)
 	if err != nil {
 		logger.Error("Error reading frame, disconnecting:", err)
-		s.state.Paired = false
+		s.proxy.Paired = false
 		return
 	}
 	switch fr.Typ {
 	case frame.CTRLUNPAIR:
-		s.state.Paired = false
+		s.proxy.Paired = false
 	case frame.CTRLEXPOSETCP:
 		port, err := strconv.Atoi(fr.Data[0])
 		if err != nil {
 			logger.Error("Error converting port to int:", err)
 			return
 		}
-		s.state.ExposeTcp(port)
+		s.proxy.ExposeTcp(port)
 	case frame.CTRLHIDETCP:
 		port, err := strconv.Atoi(fr.Data[0])
 		if err != nil {
 			logger.Error("Error converting port to int:", err)
 			return
 		}
-		s.state.HideTcp(port)
+		s.proxy.HideTcp(port)
 	}
 }

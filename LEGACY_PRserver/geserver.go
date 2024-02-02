@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/tls"
 	"crypto/x509"
+	main2 "example.com/reverseproxy/cmd/GoExposeServer"
 	"example.com/reverseproxy/pkg/console"
 	"example.com/reverseproxy/pkg/frame"
 	"fmt"
@@ -67,7 +68,7 @@ func (s *GeServer) run(stop <-chan struct{}) {
 
 func (s *GeServer) connectControl(stop <-chan struct{}, netIn chan<- *frame.CTRLFrame, config *tls.Config) {
 
-	l, err := tls.Listen("tcp", ":"+strconv.Itoa(int(CTRLPORT)), config)
+	l, err := tls.Listen("tcp", ":"+strconv.Itoa(int(main2.CTRLPORT)), config)
 	if err != nil {
 		return
 	}

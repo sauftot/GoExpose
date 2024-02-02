@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-type State struct {
+type Proxy struct {
 	Paired       bool
 	PairedIP     net.Addr
 	NetOut       chan *frame.CTRLFrame
@@ -16,36 +16,36 @@ type State struct {
 	proxyPorts   []int
 }
 
-func NewState() *State {
-	return &State{
+func NewState() *Proxy {
+	return &Proxy{
 		Paired:       false,
 		exposedPorts: make(map[int]bool),
 		proxyPorts:   make([]int, 0),
 	}
 }
 
-func (s *State) ExposeTcp(port int) {
+func (p *Proxy) ExposeTcp(port int) {
 	/*
 		Check if the port is already exposed. If not, start an Exposer for the external port.
 	*/
 	if port < 1024 || port > 65535 {
 		return
 	}
-	if exposed := s.exposedPorts[port]; exposed {
+	if exposed := p.exposedPorts[port]; exposed {
 		return
 	}
-	if len(s.proxyPorts) >= 10 {
+	if len(p.proxyPorts) >= 10 {
 		return
 	}
 
-	s.exposedPorts[port] = true
-	s.proxyPorts = append(s.proxyPorts, port)
+	p.exposedPorts[port] = true
+	p.proxyPorts = append(p.proxyPorts, port)
 	// Start a listener on the port
 	wg.Add(1)
-	go s.startExposer(port)
+	go p.startExposer(port)
 }
 
-func (s *State) HideTcp(port int) {
+func (p *Proxy) HideTcp(port int) {
 	/*
 		Check if the port is being exposed. If so, stop the listener for external connections and send a signal to all relay
 		goroutines with this port to stop. Remove the port fro the list of exposed ports.
@@ -53,21 +53,21 @@ func (s *State) HideTcp(port int) {
 	if port < 1024 || port > 65535 {
 		return
 	}
-	if exposed := s.exposedPorts[port]; !exposed {
+	if exposed := p.exposedPorts[port]; !exposed {
 		return
 	}
-	s.exposedPorts[port] = false
+	p.exposedPorts[port] = false
 }
 
-func (s *State) startExposer(port int) {
+func (p *Proxy) startExposer(port int) {
 	defer wg.Done()
 	defer func() {
-		for i, p := range s.proxyPorts {
-			if p == port {
-				s.proxyPorts = append(s.proxyPorts[:i], s.proxyPorts[i+1:]...)
+		for i, o := range p.proxyPorts {
+			if o == port {
+				p.proxyPorts = append(p.proxyPorts[:i], p.proxyPorts[i+1:]...)
 			}
 		}
-		s.exposedPorts[port] = false
+		p.exposedPorts[port] = false
 	}()
 	// Accept a connection
 	// Start a listener on a proxy port
@@ -81,7 +81,7 @@ func (s *State) startExposer(port int) {
 		return
 	}
 
-	for s.exposedPorts[port] && s.Paired {
+	for p.exposedPorts[port] && p.Paired {
 		select {
 		case <-stop:
 			return
@@ -102,7 +102,7 @@ func (s *State) startExposer(port int) {
 				}
 			}
 			for i := 0; i < 10; i++ {
-				if s.proxyPorts[i] == port {
+				if p.proxyPorts[i] == port {
 					proxyPort = TCPPROXYBASE + i
 				}
 			}
@@ -112,7 +112,7 @@ func (s *State) startExposer(port int) {
 				logger.Error("Error exposer listening on proxy port:", err)
 				return
 			}
-			s.NetOut <- frame.NewCTRLFrame(frame.CTRLCONNECT, []string{strconv.Itoa(port)})
+			p.NetOut <- frame.NewCTRLFrame(frame.CTRLCONNECT, []string{strconv.Itoa(port)})
 
 			// Client has 2 seconds to connect to the proxy port
 			err = lProxy.SetDeadline(time.Now().Add(2 * time.Second))
@@ -126,7 +126,7 @@ func (s *State) startExposer(port int) {
 				return
 			}
 			ip1, _, _ := net.SplitHostPort(proxConn.RemoteAddr().String())
-			ip2, _, _ := net.SplitHostPort(s.PairedIP.String())
+			ip2, _, _ := net.SplitHostPort(p.PairedIP.String())
 
 			if ip1 != ip2 {
 				logger.Error("Error: IP mismatch", errors.New("IP mismatch"))
@@ -134,16 +134,16 @@ func (s *State) startExposer(port int) {
 			}
 			// hand off the connections to relayTcp
 			wg.Add(1)
-			go s.relayTcp(extConn, proxConn, port)
+			go p.relayTcp(extConn, proxConn, port)
 			wg.Add(1)
-			go s.relayTcp(proxConn, extConn, port)
+			go p.relayTcp(proxConn, extConn, port)
 		}
 	}
 }
 
-func (s *State) relayTcp(conn1, conn2 *net.TCPConn, port int) {
+func (p *Proxy) relayTcp(conn1, conn2 *net.TCPConn, port int) {
 	defer wg.Done()
-	for s.exposedPorts[port] && s.Paired {
+	for p.exposedPorts[port] && p.Paired {
 		select {
 		case <-stop:
 			return
@@ -163,11 +163,11 @@ func (s *State) relayTcp(conn1, conn2 *net.TCPConn, port int) {
 	}
 }
 
-func (s *State) CleanUp() {
-	s.Paired = false
-	s.PairedIP = nil
-	s.proxyPorts = make([]int, 0)
-	for k := range s.exposedPorts {
-		s.exposedPorts[k] = false
+func (p *Proxy) CleanUp() {
+	p.Paired = false
+	p.PairedIP = nil
+	p.proxyPorts = make([]int, 0)
+	for k := range p.exposedPorts {
+		p.exposedPorts[k] = false
 	}
 }
