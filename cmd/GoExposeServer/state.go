@@ -61,6 +61,14 @@ func (s *State) HideTcp(port int) {
 
 func (s *State) startExposer(port int) {
 	defer wg.Done()
+	defer func() {
+		for i, p := range s.proxyPorts {
+			if p == port {
+				s.proxyPorts = append(s.proxyPorts[:i], s.proxyPorts[i+1:]...)
+			}
+		}
+		s.exposedPorts[port] = false
+	}()
 	// Accept a connection
 	// Start a listener on a proxy port
 	// Send CTRLCONNECT with the proxy port to the client
@@ -129,15 +137,6 @@ func (s *State) startExposer(port int) {
 			go s.relayTcp(extConn, proxConn, port)
 			wg.Add(1)
 			go s.relayTcp(proxConn, extConn, port)
-		}
-	}
-
-	if !s.Paired {
-		return
-	}
-	for i, p := range s.proxyPorts {
-		if p == port {
-			s.proxyPorts = append(s.proxyPorts[:i], s.proxyPorts[i+1:]...)
 		}
 	}
 }
