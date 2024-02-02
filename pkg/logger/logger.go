@@ -17,13 +17,13 @@ type Logger struct {
 }
 
 func NewLogger(logFileName string) (*Logger, error) {
-	file, err := os.OpenFile(logFileName+".log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	file, err := os.OpenFile(logFileName+".log", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
 	if err != nil {
 		return nil, err
 	}
 	return &Logger{
-		consoleLogger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		fileLogger:    slog.New(slog.NewTextHandler(file, nil)),
+		consoleLogger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})),
+		fileLogger:    slog.New(slog.NewTextHandler(file, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	}, nil
 }
 
