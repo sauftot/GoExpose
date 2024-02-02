@@ -112,7 +112,8 @@ func (p *Proxy) startExposer(port int) {
 				logger.Error("Error exposer listening on proxy port:", err)
 				return
 			}
-			p.NetOut <- frame.NewCTRLFrame(frame.CTRLCONNECT, []string{strconv.Itoa(port)})
+			p.NetOut <- frame.NewCTRLFrame(frame.CTRLCONNECT, []string{strconv.Itoa(port),
+				strconv.Itoa(proxyPort)})
 
 			// Client has 2 seconds to connect to the proxy port
 			err = lProxy.SetDeadline(time.Now().Add(2 * time.Second))

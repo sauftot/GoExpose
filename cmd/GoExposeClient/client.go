@@ -73,11 +73,23 @@ func (c *Client) handleCommand(cmd []string) {
 		}
 		c.proxy.connectToServer(cmd[1])
 	case "unpair":
-
+		if !c.proxy.Paired {
+			fmt.Println("[ERROR] Not paired!")
+			return
+		}
+		c.proxy.Paired = false
 	case "expose":
-
+		if !c.proxy.Paired {
+			fmt.Println("[ERROR] Not paired!")
+			return
+		}
+		c.proxy.expose(cmd[1])
 	case "hide":
-
+		if !c.proxy.Paired {
+			fmt.Println("[ERROR] Not paired!")
+			return
+		}
+		c.proxy.hide(cmd[1])
 	default:
 		fmt.Println("[ERROR] Unknown command: ", cmd[0], " use 'pair', 'unpair', 'expose' or 'hide'.")
 	}
