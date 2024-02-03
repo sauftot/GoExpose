@@ -42,8 +42,8 @@ func (s *Server) run() {
 			s.proxy.CleanUp()
 			logger.Log("Waiting for client to connect...")
 			conn := s.waitForCtrlConnection()
-			logger.Log("Client connected: " + conn.RemoteAddr().String())
 			if conn != nil {
+				logger.Log("Client connected: " + conn.RemoteAddr().String())
 				// Run a goroutine that will handle all writes to the ctrl connection
 				wg.Add(1)
 				go s.manageCtrlConnectionOutgoing(conn)
@@ -97,6 +97,15 @@ func (s *Server) waitForCtrlConnection() net.Conn {
 	}
 	stopCauseAccept := make(chan struct{})
 	defer close(stopCauseAccept)
+	defer func(l net.Listener) {
+		if l != nil {
+			logger.Log("DEFER closing listener")
+			err = l.Close()
+			if err != nil {
+				logger.Error("Error closing listener:", err)
+			}
+		}
+	}(l)
 
 	// Run a helper goroutine to close the listener when stop is received from console
 	wg.Add(1)
@@ -111,6 +120,7 @@ func (s *Server) waitForCtrlConnection() net.Conn {
 				if err != nil {
 					logger.Error("Error closing TLS listener:", err)
 				}
+				l = nil
 			case <-stopBecauseAccept:
 				dontClose = false
 			}
@@ -123,8 +133,8 @@ func (s *Server) waitForCtrlConnection() net.Conn {
 		logger.Error("Error accepting connection:", err)
 		return nil
 	}
-	logger.Log("Client connected: " + conn.RemoteAddr().String())
 	s.proxy.PairedIP = conn.RemoteAddr()
+	s.proxy.Paired = true
 	return conn
 }
 
@@ -155,13 +165,16 @@ func (s *Server) manageCtrlConnectionOutgoing(conn net.Conn) {
 
 func (s *Server) manageCtrlConnectionIncoming(conn net.Conn) {
 	defer func(conn net.Conn) {
-		err := conn.Close()
-		if err != nil {
+		if conn != nil {
+			err := conn.Close()
+			if err != nil {
 
+			}
 		}
 	}(conn)
 	stopCauseConnDead := make(chan struct{})
 	defer close(stopCauseConnDead)
+	logger.Log("Starting manageCtrlConnectionIncoming")
 
 	// Run a helper goroutine to close the connection when stop is received from console
 	wg.Add(1)

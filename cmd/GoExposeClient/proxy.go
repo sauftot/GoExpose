@@ -49,6 +49,7 @@ func (p *Proxy) connectToServer(domainOrIp string) {
 		logger.Error("Error connecting to server: ", err)
 		return
 	}
+	logger.Log("Connected!")
 	p.Paired = true
 	// spin off a go routine to handle the connection
 	wg.Add(1)
@@ -59,13 +60,17 @@ func (p *Proxy) connectToServer(domainOrIp string) {
 func (p *Proxy) handleServerConnection() {
 	defer wg.Done()
 	defer func() {
-		err := p.CtrlConn.Close()
-		if err != nil {
-			return
+		if p.CtrlConn != nil {
+			err := p.CtrlConn.Close()
+			p.CtrlConn = nil
+			if err != nil {
+				return
+			}
 		}
 	}()
 	for p.Paired {
 		fr, err := frame.ReadFrame(p.CtrlConn)
+		logger.Log("Received frame from server: " + strconv.Itoa(int(fr.Typ)) + " " + fr.Data[0])
 		if err != nil {
 			logger.Error("Error reading frame from server: ", err)
 			return
