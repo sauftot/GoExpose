@@ -130,6 +130,7 @@ func (s *Server) waitForCtrlConnection() net.Conn {
 
 func (s *Server) manageCtrlConnectionOutgoing(conn net.Conn) {
 	defer wg.Done()
+	logger.Log("Starting manageCtrlConnectionOutgoing")
 	s.proxy.NetOut = make(chan *frame.CTRLFrame, 100)
 	for {
 		select {
@@ -188,6 +189,7 @@ func (s *Server) manageCtrlConnectionIncoming(conn net.Conn) {
 			if s.proxy.Paired {
 				s.handleCtrlFrame(conn)
 			} else {
+				logger.Log("IncomingHandler returning due to disconnect")
 				return
 			}
 		}
