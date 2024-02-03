@@ -22,6 +22,7 @@ func NewClient() *Client {
 }
 
 func (c *Client) run(input chan []string) {
+	defer wg.Done()
 	config := c.prepareTlsConfig()
 	if config == nil {
 		logger.Error("Error preparing TLS config: ", nil)
