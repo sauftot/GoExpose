@@ -37,6 +37,7 @@ func (c *Client) run(input chan []string) {
 			return
 		case cmd := <-input:
 			c.handleCommand(cmd)
+			logger.Log("Command handled")
 		}
 	}
 }

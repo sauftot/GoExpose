@@ -13,7 +13,6 @@ var stop chan struct{}
 
 /*
 	TODO: find why client doesnt shut down after it was conected to a server and exit was called (probably: missing done() or stop handler)
-	TODO: expose more server tcp ports and test relay with nc
 */
 
 func main() {

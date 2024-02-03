@@ -184,6 +184,7 @@ func (s *Server) manageCtrlConnectionIncoming(conn net.Conn) {
 			select {
 			case <-stop:
 				dontClose = false
+				s.proxy.Paired = false
 				s.proxy.NetOut <- frame.NewCTRLFrame(frame.CTRLUNPAIR, nil)
 				logger.Log("Closing TLS Conn")
 				s.proxy.NetOut <- frame.NewCTRLFrame(frame.STOP, nil)

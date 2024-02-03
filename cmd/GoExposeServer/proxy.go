@@ -20,7 +20,7 @@ func NewState() *Proxy {
 	return &Proxy{
 		Paired:       false,
 		exposedPorts: make(map[int]bool),
-		proxyPorts:   make([]int, 0),
+		proxyPorts:   make([]int, 10),
 	}
 }
 
@@ -102,7 +102,7 @@ func (p *Proxy) startExposer(port int) {
 					return
 				}
 			}
-			for i := 0; i < 10; i++ {
+			for i := 0; i < len(p.proxyPorts); i++ {
 				if p.proxyPorts[i] == port {
 					proxyPort = TCPPROXYBASE + i
 				}
