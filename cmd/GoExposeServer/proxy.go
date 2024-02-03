@@ -41,6 +41,7 @@ func (p *Proxy) ExposeTcp(port int) {
 	p.exposedPorts[port] = true
 	p.proxyPorts = append(p.proxyPorts, port)
 	// Start a listener on the port
+	logger.Log("Starting exposer for port: " + strconv.Itoa(port))
 	wg.Add(1)
 	go p.startExposer(port)
 }
@@ -134,6 +135,7 @@ func (p *Proxy) startExposer(port int) {
 				return
 			}
 			// hand off the connections to relayTcp
+			logger.Log("Handing off connections to relay goroutines on port: " + strconv.Itoa(port))
 			wg.Add(1)
 			go p.relayTcp(extConn, proxConn, port)
 			wg.Add(1)

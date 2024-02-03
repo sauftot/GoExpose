@@ -19,7 +19,9 @@ func InputHandler(stop chan<- struct{}, input chan<- []string) {
 		}
 		lower := strings.ToLower(cslString)
 		trimmed := strings.Trim(lower, " \n")
-		tokens := strings.Split(trimmed, " ")
+		trimmed2 := strings.TrimSpace(trimmed)
+		tokens := strings.Split(trimmed2, " ")
+		fmt.Println("CONSOLECONTROLLER: Received command: ", tokens[0])
 		switch tokens[0] {
 		case "exit":
 			fmt.Println("CONSOLECONTROLLER: Received stop command!")

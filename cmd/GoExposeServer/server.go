@@ -40,7 +40,9 @@ func (s *Server) run() {
 			return
 		default:
 			s.proxy.CleanUp()
+			logger.Log("Waiting for client to connect...")
 			conn := s.waitForCtrlConnection()
+			logger.Log("Client connected: " + conn.RemoteAddr().String())
 			if conn != nil {
 				// Run a goroutine that will handle all writes to the ctrl connection
 				wg.Add(1)
@@ -93,14 +95,6 @@ func (s *Server) waitForCtrlConnection() net.Conn {
 		logger.Error("Error TLS listening:", err)
 		return nil
 	}
-	defer func(l net.Listener) {
-		logger.Log("Closing TLS listener")
-		err := (l).Close()
-		if err != nil {
-			return
-		}
-		return
-	}(l)
 	stopCauseAccept := make(chan struct{})
 	defer close(stopCauseAccept)
 
@@ -207,6 +201,7 @@ func (s *Server) handleCtrlFrame(conn net.Conn) {
 		s.proxy.Paired = false
 		return
 	}
+	logger.Log("Received frame from CtrlConn: " + strconv.Itoa(int(fr.Typ)) + " " + fr.Data[0])
 	switch fr.Typ {
 	case frame.CTRLUNPAIR:
 		s.proxy.Paired = false

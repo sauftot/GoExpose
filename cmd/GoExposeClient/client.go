@@ -28,6 +28,7 @@ func (c *Client) run(input chan []string) {
 		return
 	}
 	c.proxy.setConfig(config)
+	logger.Log("Client started")
 
 	for {
 		select {
