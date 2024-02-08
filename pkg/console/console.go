@@ -2,6 +2,7 @@ package console
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -9,7 +10,7 @@ import (
 	"strings"
 )
 
-func InputHandler(stop chan<- struct{}, input chan<- []string) {
+func InputHandler(cancel context.CancelFunc, input chan<- []string) {
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		cslString, err := reader.ReadString('\n')
@@ -25,7 +26,7 @@ func InputHandler(stop chan<- struct{}, input chan<- []string) {
 		switch tokens[0] {
 		case "exit":
 			fmt.Println("CONSOLECONTROLLER: Received stop command!")
-			close(stop)
+			cancel()
 			return
 		default:
 			input <- tokens
@@ -33,13 +34,13 @@ func InputHandler(stop chan<- struct{}, input chan<- []string) {
 	}
 }
 
-func StopHandler(stop chan<- struct{}) {
+func StopHandler(cancel context.CancelFunc) {
 	var cslString string
 	for {
 		_, err := fmt.Scanln(&cslString)
 		if err != nil {
 			fmt.Println("CONSOLECONTROLLER: Couldn't read from console!")
-			close(stop)
+
 			return
 		}
 		cslString = strings.ToLower(cslString)
@@ -47,7 +48,7 @@ func StopHandler(stop chan<- struct{}) {
 		switch tokens[0] {
 		case "exit":
 			fmt.Println("CONSOLECONTROLLER: Received stop command!")
-			close(stop)
+			cancel()
 			return
 		}
 	}

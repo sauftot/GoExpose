@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"example.com/reverseproxy/pkg/frame"
 	"net"
@@ -24,10 +25,11 @@ func NewState() *Proxy {
 	}
 }
 
-func (p *Proxy) ExposeTcp(port int) {
+func (p *Proxy) ExposeTcp(ctx context.Context) {
 	/*
 		Check if the port is already exposed. If not, start an Exposer for the external port.
 	*/
+	var port = ctx.Value("port").(int)
 	if port < 1024 || port > 65535 {
 		return
 	}
@@ -43,7 +45,7 @@ func (p *Proxy) ExposeTcp(port int) {
 	// Start a listener on the port
 	logger.Log("Starting exposer for port: " + strconv.Itoa(port))
 	wg.Add(1)
-	go p.startExposer(port)
+	go p.startExposer(ctx)
 }
 
 func (p *Proxy) HideTcp(port int) {
@@ -60,7 +62,8 @@ func (p *Proxy) HideTcp(port int) {
 	p.exposedPorts[port] = false
 }
 
-func (p *Proxy) startExposer(port int) {
+func (p *Proxy) startExposer(ctx context.Context) {
+	port := ctx.Value("port").(int)
 	defer wg.Done()
 	defer func() {
 		for i, o := range p.proxyPorts {
@@ -84,7 +87,7 @@ func (p *Proxy) startExposer(port int) {
 
 	for p.exposedPorts[port] && p.Paired {
 		select {
-		case <-stop:
+		case <-ctx.Done():
 			return
 		default:
 			err = l.SetDeadline(time.Now().Add(1 * time.Second))
@@ -136,19 +139,26 @@ func (p *Proxy) startExposer(port int) {
 			}
 			// hand off the connections to relayTcp
 			logger.Log("Handing off connections to relay goroutines on port: " + strconv.Itoa(port))
+
 			wg.Add(1)
-			go p.relayTcp(extConn, proxConn, port)
+			go p.relayTcp(extConn, proxConn, ctx)
 			wg.Add(1)
-			go p.relayTcp(proxConn, extConn, port)
+			go p.relayTcp(proxConn, extConn, ctx)
 		}
 	}
 }
 
-func (p *Proxy) relayTcp(conn1, conn2 *net.TCPConn, port int) {
+func (p *Proxy) relayTcp(conn1, conn2 *net.TCPConn, ctx context.Context) {
 	defer wg.Done()
-	for p.exposedPorts[port] && p.Paired {
+	defer func() {
+		err := conn1.Close()
+		if err != nil {
+			return
+		}
+	}()
+	for p.Paired {
 		select {
-		case <-stop:
+		case <-ctx.Done():
 			return
 		default:
 			buf := make([]byte, 1024)

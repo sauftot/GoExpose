@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"example.com/reverseproxy/pkg/frame"
@@ -18,11 +19,15 @@ const (
 type Server struct {
 	proxy  *Proxy
 	config *tls.Config
+
+	ctx      context.Context
+	exposers map[int]context.CancelFunc
 }
 
-func NewServer() *Server {
+func NewServer(context context.Context) *Server {
 	return &Server{
 		proxy: NewState(),
+		ctx:   context,
 	}
 }
 
@@ -36,7 +41,7 @@ func (s *Server) run() {
 
 	for {
 		select {
-		case <-stop:
+		case <-s.ctx.Done():
 			return
 		default:
 			s.proxy.CleanUp()
@@ -109,11 +114,11 @@ func (s *Server) waitForCtrlConnection() net.Conn {
 
 	// Run a helper goroutine to close the listener when stop is received from console
 	wg.Add(1)
-	go func(stop chan struct{}, stopBecauseAccept chan struct{}, l net.Listener) {
+	go func(ctx context.Context, stopBecauseAccept chan struct{}, l net.Listener) {
 		defer wg.Done()
 		for dontClose := true; dontClose; {
 			select {
-			case <-stop:
+			case <-ctx.Done():
 				dontClose = false
 				logger.Log("Closing TLS listener")
 				err := l.Close()
@@ -126,7 +131,7 @@ func (s *Server) waitForCtrlConnection() net.Conn {
 			}
 		}
 		return
-	}(stop, stopCauseAccept, l)
+	}(s.ctx, stopCauseAccept, l)
 
 	conn, err := l.Accept()
 	if err != nil {
@@ -144,7 +149,7 @@ func (s *Server) manageCtrlConnectionOutgoing(conn net.Conn) {
 	s.proxy.NetOut = make(chan *frame.CTRLFrame, 100)
 	for {
 		select {
-		case <-stop:
+		case <-s.ctx.Done():
 			return
 		case fr := <-s.proxy.NetOut:
 			if fr.Typ == frame.STOP {
@@ -178,11 +183,11 @@ func (s *Server) manageCtrlConnectionIncoming(conn net.Conn) {
 
 	// Run a helper goroutine to close the connection when stop is received from console
 	wg.Add(1)
-	go func(stop chan struct{}, stopCauseConnDead chan struct{}) {
+	go func(ctx context.Context, stopCauseConnDead chan struct{}) {
 		wg.Done()
 		for dontClose := true; dontClose; {
 			select {
-			case <-stop:
+			case <-ctx.Done():
 				dontClose = false
 				s.proxy.Paired = false
 				s.proxy.NetOut <- frame.NewCTRLFrame(frame.CTRLUNPAIR, nil)
@@ -193,11 +198,11 @@ func (s *Server) manageCtrlConnectionIncoming(conn net.Conn) {
 			}
 		}
 		return
-	}(stop, stopCauseConnDead)
+	}(s.ctx, stopCauseConnDead)
 
 	for {
 		select {
-		case <-stop:
+		case <-s.ctx.Done():
 			return
 		default:
 			if s.proxy.Paired {
@@ -227,13 +232,19 @@ func (s *Server) handleCtrlFrame(conn net.Conn) {
 			logger.Error("Error converting port to int:", err)
 			return
 		}
-		s.proxy.ExposeTcp(port)
+		c := context.WithValue(s.ctx, "port", port)
+		tcpContext, cancel := context.WithCancel(c)
+		s.exposers[port] = cancel
+		s.proxy.ExposeTcp(tcpContext)
 	case frame.CTRLHIDETCP:
 		port, err := strconv.Atoi(fr.Data[0])
 		if err != nil {
 			logger.Error("Error converting port to int:", err)
 			return
 		}
-		s.proxy.HideTcp(port)
+		if s.exposers[port] != nil {
+			s.exposers[port]()
+			delete(s.exposers, port)
+		}
 	}
 }

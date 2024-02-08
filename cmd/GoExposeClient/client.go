@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 const (
@@ -13,11 +15,14 @@ const (
 
 type Client struct {
 	proxy *Proxy
+
+	ctx context.Context
 }
 
-func NewClient() *Client {
+func NewClient(context context.Context) *Client {
 	return &Client{
 		proxy: NewProxy(),
+		ctx:   context,
 	}
 }
 
@@ -33,7 +38,7 @@ func (c *Client) run(input chan []string) {
 
 	for {
 		select {
-		case <-stop:
+		case <-c.ctx.Done():
 			return
 		case cmd := <-input:
 			c.handleCommand(cmd)
@@ -66,29 +71,52 @@ func (c *Client) prepareTlsConfig() *tls.Config {
 func (c *Client) handleCommand(cmd []string) {
 	switch cmd[0] {
 	case "pair":
-		if c.proxy.Paired {
-			fmt.Println("[ERROR] Already paired!")
-			return
+		if c.proxy.ctx != nil {
+			if c.proxy.ctx.Value("paired") == true {
+				fmt.Println("[ERROR] Already paired!")
+				return
+			} else {
+				logger.Error("Error: ctx is not nil but not paired!", nil)
+				return
+			}
 		}
 		if len(cmd) != 2 {
 			fmt.Println("[ERROR] Invalid Arguments! Use 'pair <server>'")
 			return
 		}
-		c.proxy.connectToServer(cmd[1])
+		c.proxy.connectToServer(cmd[1], c.ctx)
 	case "unpair":
-		if !c.proxy.Paired {
+		if c.proxy.ctx.Value("paired") == true {
 			fmt.Println("[ERROR] Not paired!")
 			return
 		}
-		c.proxy.Paired = false
+		c.proxy.ctxClose()
 	case "expose":
-		if !c.proxy.Paired {
+		if c.proxy.ctx.Value("paired") == true {
 			fmt.Println("[ERROR] Not paired!")
 			return
 		}
-		c.proxy.expose(cmd[1])
+		port, err := strconv.Atoi(cmd[1])
+		if err != nil {
+			fmt.Println("[ERROR] Invalid port number!")
+			return
+		}
+		if c.proxy.exposedPortsNr >= 10 {
+			fmt.Println("[ERROR] Maximum number of exposed ports reached!")
+			return
+		}
+
+		if c.proxy.exposedPorts[port] != nil {
+			fmt.Println("[ERROR] Port already exposed!")
+			return
+		}
+		c.proxy.expose(port)
+
+		/*
+			TODO: Implement contexts properly. Structure: stop ctx -> client ctx -> proxy ctx (paired) -> port ctx
+		*/
 	case "hide":
-		if !c.proxy.Paired {
+		if c.proxy.ctx.Value("paired") == true {
 			fmt.Println("[ERROR] Not paired!")
 			return
 		}

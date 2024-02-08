@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"example.com/reverseproxy/pkg/console"
 	mylog "example.com/reverseproxy/pkg/logger"
 	"sync"
@@ -9,7 +10,6 @@ import (
 var wg sync.WaitGroup
 var logger *mylog.Logger
 var loglevel = mylog.DEBUG
-var stop chan struct{}
 
 /*
 	TODO: find why client doesnt shut down after it was conected to a server and exit was called (probably: missing done() or stop handler)
@@ -23,17 +23,14 @@ func main() {
 		panic(err)
 	}
 
-	stop = make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
 	input := make(chan []string, 100)
 
-	go console.InputHandler(stop, input)
-	client := NewClient()
+	go console.InputHandler(cancel, input)
+	client := NewClient(ctx)
 	wg.Add(1)
 	go client.run(input)
 
 	wg.Wait()
-	if _, err := <-stop; err {
-		close(stop)
-	}
 	logger.Log("GoExposeServer stopped")
 }

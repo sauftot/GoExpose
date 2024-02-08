@@ -1,28 +1,31 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"example.com/reverseproxy/pkg/frame"
 	"fmt"
 	"net"
 	"strconv"
+	"time"
 )
 
 type Proxy struct {
-	Paired         bool
-	CtrlConn       *tls.Conn
-	ip             net.IP
-	config         *tls.Config
-	exposedPorts   map[int]bool
+	CtrlConn *tls.Conn
+	ip       net.IP
+	config   *tls.Config
+
+	ctx            context.Context
+	ctxClose       context.CancelFunc
+	exposedPorts   map[int]context.CancelFunc
 	exposedPortsNr int
 }
 
 func NewProxy() *Proxy {
 	return &Proxy{
-		Paired:         false,
 		ip:             nil,
 		config:         nil,
-		exposedPorts:   make(map[int]bool),
+		exposedPorts:   make(map[int]context.CancelFunc),
 		exposedPortsNr: 0,
 	}
 }
@@ -31,7 +34,7 @@ func (p *Proxy) setConfig(config *tls.Config) {
 	p.config = config
 }
 
-func (p *Proxy) connectToServer(domainOrIp string) {
+func (p *Proxy) connectToServer(domainOrIp string, ctx context.Context) {
 	ip := net.ParseIP(domainOrIp)
 	if ip == nil {
 		ip2, err := net.ResolveIPAddr("ip4", domainOrIp)
@@ -50,7 +53,8 @@ func (p *Proxy) connectToServer(domainOrIp string) {
 		return
 	}
 	logger.Log("Connected!")
-	p.Paired = true
+	tempCtx := context.WithValue(ctx, "port", CTRLPORT)
+	p.ctx, p.ctxClose = context.WithCancel(tempCtx)
 	// spin off a goroutine to handle the connection
 	wg.Add(1)
 	p.CtrlConn = conn
@@ -62,42 +66,43 @@ func (p *Proxy) handleServerConnection() {
 	defer func() {
 		if p.CtrlConn != nil {
 			err := p.CtrlConn.Close()
-			p.CtrlConn = nil
 			if err != nil {
-				return
+				logger.Error("Error closing connection: ", err)
 			}
+			p.CtrlConn = nil
+			p.ctxClose()
+
 		}
 	}()
-	for p.Paired {
-		fr, err := frame.ReadFrame(p.CtrlConn)
-		if err != nil {
-			logger.Error("Error reading frame from server: ", err)
+	for {
+		select {
+		case <-p.ctx.Done():
 			return
+		default:
+			err := p.CtrlConn.SetDeadline(time.Now().Add(1 * time.Second))
+			if err != nil {
+				logger.Error("Error setting deadline: ", err)
+				return
+			}
+			fr, err := frame.ReadFrame(p.CtrlConn)
+			if err != nil {
+				logger.Error("Error reading frame from server: ", err)
+				return
+			}
+			logger.Log("Received frame from server: " + strconv.Itoa(int(fr.Typ)))
+			switch fr.Typ {
+			case frame.CTRLUNPAIR:
+				return
+			case frame.CTRLCONNECT:
+				p.startProxy(fr)
+			}
 		}
-		logger.Log("Received frame from server: " + strconv.Itoa(int(fr.Typ)))
-		switch fr.Typ {
-		case frame.CTRLUNPAIR:
-			p.Paired = false
-		case frame.CTRLCONNECT:
-			p.startProxy(fr)
-		}
+
 	}
 }
 
-func (p *Proxy) expose(portStr string) {
-	if p.exposedPortsNr >= 10 {
-		fmt.Println("[ERROR] Maximum number of exposed ports reached!")
-		return
-	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		fmt.Println("[ERROR] Invalid port number!")
-		return
-	}
-	if p.exposedPorts[port] {
-		fmt.Println("[ERROR] Port already exposed!")
-		return
-	}
+func (p *Proxy) expose(ctx context.Context, cancel context.CancelFunc, portStr string) {
+	port := ctx.Value("port").(int)
 	// send the CTRLEXPOSE with the port to the server
 	fr := frame.NewCTRLFrame(frame.CTRLEXPOSETCP, []string{portStr})
 	bytes, err := frame.ToByteArray(fr)
@@ -109,7 +114,7 @@ func (p *Proxy) expose(portStr string) {
 	if err != nil {
 		return
 	}
-	p.exposedPorts[port] = true
+	p.exposedPorts[port] = cancel
 	p.exposedPortsNr++
 }
 

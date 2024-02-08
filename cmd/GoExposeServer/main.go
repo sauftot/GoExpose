@@ -1,15 +1,17 @@
 package main
 
 import (
-	"example.com/reverseproxy/pkg/console"
+	"context"
 	mylog "example.com/reverseproxy/pkg/logger"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 )
 
 var wg sync.WaitGroup
 var logger *mylog.Logger
 var loglevel = mylog.DEBUG
-var stop chan struct{}
 
 /*
 	TODO: find why server doesnt shut down properly (missing done() or stop handler)
@@ -23,15 +25,26 @@ func main() {
 		panic(err)
 	}
 
-	stop = make(chan struct{})
-	go console.StopHandler(stop)
-	server := NewServer()
+	// ROOT CONTEXT
+	ctx, cancel := context.WithCancel(context.Background())
+
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	go func(signals chan os.Signal, cancelFunc context.CancelFunc) {
+		for {
+			select {
+			case <-signals:
+				logger.Log("Received signal!")
+				cancel()
+				return
+			}
+		}
+	}(signals, cancel)
+
+	server := NewServer(ctx)
 	wg.Add(1)
 	go server.run()
 
 	wg.Wait()
-	if _, err := <-stop; err {
-		close(stop)
-	}
 	logger.Log("GoExposeServer stopped")
 }
