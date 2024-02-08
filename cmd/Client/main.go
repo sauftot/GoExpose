@@ -32,5 +32,5 @@ func main() {
 	go client.run(input)
 
 	wg.Wait()
-	logger.Log("GoExposeServer stopped")
+	logger.Log("Server stopped")
 }

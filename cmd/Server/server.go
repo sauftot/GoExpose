@@ -222,7 +222,7 @@ func (s *Server) handleCtrlFrame(conn net.Conn) {
 		s.proxy.Paired = false
 		return
 	}
-	logger.Log("Received frame from CtrlConn: " + strconv.Itoa(int(fr.Typ)) + " " + fr.Data[0])
+	logger.Log("Received frame from ctrlConn: " + strconv.Itoa(int(fr.Typ)) + " " + fr.Data[0])
 	switch fr.Typ {
 	case frame.CTRLUNPAIR:
 		s.proxy.Paired = false

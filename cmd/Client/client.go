@@ -4,9 +4,9 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 )
 
 const (
@@ -14,26 +14,27 @@ const (
 )
 
 type Client struct {
-	proxy *Proxy
+	proxy       *Proxy
+	proxyCancel context.CancelFunc
 
-	ctx context.Context
+	ctx       context.Context
+	tlsConfig *tls.Config
 }
 
 func NewClient(context context.Context) *Client {
 	return &Client{
-		proxy: NewProxy(),
+		proxy: nil,
 		ctx:   context,
 	}
 }
 
 func (c *Client) run(input chan []string) {
 	defer wg.Done()
-	config := c.prepareTlsConfig()
-	if config == nil {
+	c.tlsConfig = c.prepareTlsConfig()
+	if c.tlsConfig == nil {
 		logger.Error("Error preparing TLS config: ", nil)
 		return
 	}
-	c.proxy.setConfig(config)
 	logger.Log("Client started")
 
 	for {
@@ -41,6 +42,7 @@ func (c *Client) run(input chan []string) {
 		case <-c.ctx.Done():
 			return
 		case cmd := <-input:
+			logger.Log("Command received: " + fmt.Sprintf("Command received: %v", cmd))
 			c.handleCommand(cmd)
 			logger.Log("Command handled")
 		}
@@ -65,59 +67,64 @@ func (c *Client) prepareTlsConfig() *tls.Config {
 		Certificates:       []tls.Certificate{cer},
 		InsecureSkipVerify: true, // The servers certificate is self-signed, the clients is signed by the server. This should be adjusted in the future
 	}
+	logger.Log("TLS config prepared")
 	return config
 }
 
 func (c *Client) handleCommand(cmd []string) {
 	switch cmd[0] {
 	case "pair":
-		if c.proxy.ctx != nil {
-			if c.proxy.ctx.Value("paired") == true {
-				fmt.Println("[ERROR] Already paired!")
-				return
-			} else {
-				logger.Error("Error: ctx is not nil but not paired!", nil)
+		if len(cmd) != 2 {
+			fmt.Println("[ERROR] Usage: pair <server>")
+			return
+		}
+		if c.proxy != nil {
+			fmt.Println("[ERROR] Proxy already paired with server")
+			return
+		}
+		ip := net.ParseIP(cmd[1])
+		if ip == nil {
+			i, err := net.ResolveIPAddr("ip4", cmd[1])
+			ip = i.IP
+			if err != nil {
+				fmt.Println("[ERROR] Invalid server address")
+				logger.Error("Error resolving domain name: ", err)
 				return
 			}
 		}
-		if len(cmd) != 2 {
-			fmt.Println("[ERROR] Invalid Arguments! Use 'pair <server>'")
-			return
+		ct := context.WithValue(c.ctx, "ip", ip)
+		ctx, cancel := context.WithCancel(ct)
+		c.proxyCancel = cancel
+		c.proxy = NewProxy(ctx, cancel, c.tlsConfig)
+		if !c.proxy.connectToServer() {
+			logger.Error("Error connecting to server", nil)
+			c.proxyCancel()
+			c.proxy = nil
 		}
-		c.proxy.connectToServer(cmd[1], c.ctx)
 	case "unpair":
-		if c.proxy.ctx.Value("paired") == true {
-			fmt.Println("[ERROR] Not paired!")
+		if c.proxy == nil {
+			fmt.Println("[ERROR] Proxy not paired with server")
 			return
 		}
-		c.proxy.ctxClose()
+		c.proxyCancel()
+		c.proxy = nil
 	case "expose":
-		if c.proxy.ctx.Value("paired") == true {
-			fmt.Println("[ERROR] Not paired!")
+		if c.proxy == nil {
+			fmt.Println("[ERROR] Proxy not paired with server")
 			return
 		}
-		port, err := strconv.Atoi(cmd[1])
-		if err != nil {
-			fmt.Println("[ERROR] Invalid port number!")
+		if len(cmd) != 2 {
+			fmt.Println("[ERROR] Usage: expose <port>")
 			return
 		}
-		if c.proxy.exposedPortsNr >= 10 {
-			fmt.Println("[ERROR] Maximum number of exposed ports reached!")
-			return
-		}
-
-		if c.proxy.exposedPorts[port] != nil {
-			fmt.Println("[ERROR] Port already exposed!")
-			return
-		}
-		c.proxy.expose(port)
-
-		/*
-			TODO: Implement contexts properly. Structure: stop ctx -> client ctx -> proxy ctx (paired) -> port ctx
-		*/
+		c.proxy.expose(cmd[1])
 	case "hide":
-		if c.proxy.ctx.Value("paired") == true {
-			fmt.Println("[ERROR] Not paired!")
+		if c.proxy == nil {
+			fmt.Println("[ERROR] Proxy not paired with server")
+			return
+		}
+		if len(cmd) != 2 {
+			fmt.Println("[ERROR] Usage: hide <port>")
 			return
 		}
 		c.proxy.hide(cmd[1])
