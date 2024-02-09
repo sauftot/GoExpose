@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"example.com/reverseproxy/cmd/internal"
+	in "example.com/reverseproxy/cmd/internal"
 	"net"
 	"os"
 	"path/filepath"
@@ -146,22 +146,22 @@ func (s *Server) waitForCtrlConnection() net.Conn {
 func (s *Server) manageCtrlConnectionOutgoing(conn net.Conn) {
 	defer wg.Done()
 	logger.Log("Starting manageCtrlConnectionOutgoing")
-	s.proxy.NetOut = make(chan *internal.CTRLFrame, 100)
+	s.proxy.NetOut = make(chan *in.CTRLFrame, 100)
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
 		case fr := <-s.proxy.NetOut:
-			if fr.Typ == internal.STOP {
+			if fr.Typ == in.STOP {
 				return
 			} else {
-				err := internal.WriteFrame(conn, fr)
+				err := in.WriteFrame(conn, fr)
 				if err != nil {
 					logger.Error("Error writing frame:", err)
 					return
 				}
-				if fr.Typ == internal.CTRLUNPAIR {
-					s.proxy.NetOut = make(chan *internal.CTRLFrame, 100)
+				if fr.Typ == in.CTRLUNPAIR {
+					s.proxy.NetOut = make(chan *in.CTRLFrame, 100)
 				}
 			}
 		}
@@ -190,9 +190,9 @@ func (s *Server) manageCtrlConnectionIncoming(conn net.Conn) {
 			case <-ctx.Done():
 				dontClose = false
 				s.proxy.Paired = false
-				s.proxy.NetOut <- internal.NewCTRLFrame(internal.CTRLUNPAIR, nil)
+				s.proxy.NetOut <- in.NewCTRLFrame(in.CTRLUNPAIR, nil)
 				logger.Log("Closing TLS Conn")
-				s.proxy.NetOut <- internal.NewCTRLFrame(internal.STOP, nil)
+				s.proxy.NetOut <- in.NewCTRLFrame(in.STOP, nil)
 			case <-stopCauseConnDead:
 				dontClose = false
 			}
@@ -216,7 +216,7 @@ func (s *Server) manageCtrlConnectionIncoming(conn net.Conn) {
 }
 
 func (s *Server) handleCtrlFrame(conn net.Conn) {
-	fr, err := internal.ReadFrame(conn)
+	fr, err := in.ReadFrame(conn)
 	if err != nil {
 		logger.Error("Error reading frame, disconnecting:", err)
 		s.proxy.Paired = false
@@ -224,9 +224,9 @@ func (s *Server) handleCtrlFrame(conn net.Conn) {
 	}
 	logger.Log("Received frame from ctrlConn: " + strconv.Itoa(int(fr.Typ)) + " " + fr.Data[0])
 	switch fr.Typ {
-	case internal.CTRLUNPAIR:
+	case in.CTRLUNPAIR:
 		s.proxy.Paired = false
-	case internal.CTRLEXPOSETCP:
+	case in.CTRLEXPOSETCP:
 		port, err := strconv.Atoi(fr.Data[0])
 		if err != nil {
 			logger.Error("Error converting port to int:", err)
@@ -236,7 +236,7 @@ func (s *Server) handleCtrlFrame(conn net.Conn) {
 		tcpContext, cancel := context.WithCancel(c)
 		s.exposers[port] = cancel
 		s.proxy.ExposeTcp(tcpContext)
-	case internal.CTRLHIDETCP:
+	case in.CTRLHIDETCP:
 		port, err := strconv.Atoi(fr.Data[0])
 		if err != nil {
 			logger.Error("Error converting port to int:", err)
