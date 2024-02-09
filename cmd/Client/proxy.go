@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	cwc "example.com/reverseproxy/pkg/ctxWithCancel"
 	"example.com/reverseproxy/pkg/frame"
 	"fmt"
 	"net"
@@ -10,18 +11,13 @@ import (
 	"time"
 )
 
-type contextWithCancel struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
 type Proxy struct {
 	ctx      context.Context
 	config   *tls.Config
 	ctxClose context.CancelFunc
 	ip       net.IP
 
-	exposedPorts   map[int]contextWithCancel
+	exposedPorts   map[int]cwc.ContextWithCancel
 	exposedPortsNr int
 	ctrlConn       *tls.Conn
 }
@@ -32,7 +28,7 @@ func NewProxy(context context.Context, cancel context.CancelFunc, cfg *tls.Confi
 		ctxClose: cancel,
 		config:   cfg,
 
-		exposedPorts:   make(map[int]contextWithCancel),
+		exposedPorts:   make(map[int]cwc.ContextWithCancel),
 		exposedPortsNr: 0,
 		ctrlConn:       nil,
 	}
@@ -126,7 +122,7 @@ func (p *Proxy) startProxy(fr *frame.CTRLFrame) {
 	}
 
 	// spin off goroutines with the correct context for the port
-	ctx := p.exposedPorts[lPort].ctx
+	ctx := p.exposedPorts[lPort].Ctx
 	wg.Add(2)
 	go p.relayTcp(pConn, lConn, ctx)
 	go p.relayTcp(lConn, pConn, ctx)
@@ -181,7 +177,7 @@ func (p *Proxy) expose(portStr string) {
 	}
 	ct := context.WithValue(p.ctx, "port", portStr)
 	ctx, cancel := context.WithCancel(ct)
-	p.exposedPorts[port] = contextWithCancel{ctx, cancel}
+	p.exposedPorts[port] = cwc.ContextWithCancel{Ctx: ctx, Cancel: cancel}
 	p.exposedPortsNr++
 }
 
@@ -191,7 +187,7 @@ func (p *Proxy) hide(portStr string) {
 		fmt.Println("[ERROR] Invalid port number!")
 		return
 	}
-	if p.exposedPorts[port].ctx == nil {
+	if p.exposedPorts[port].Ctx == nil {
 		fmt.Println("[ERROR] Port not exposed!")
 		return
 	}
@@ -206,7 +202,7 @@ func (p *Proxy) hide(portStr string) {
 	if err != nil {
 		return
 	}
-	p.exposedPorts[port].cancel()
-	p.exposedPorts[port] = contextWithCancel{}
+	p.exposedPorts[port].Cancel()
+	p.exposedPorts[port] = cwc.ContextWithCancel{}
 	p.exposedPortsNr--
 }
