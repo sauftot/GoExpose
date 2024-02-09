@@ -32,5 +32,5 @@ func main() {
 	go client.run(input)
 
 	wg.Wait()
-	logger.Log("Server stopped")
+	logger.Log("Client stopped")
 }
