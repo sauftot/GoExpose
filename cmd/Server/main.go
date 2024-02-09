@@ -13,10 +13,6 @@ var wg sync.WaitGroup
 var logger *mylog.Logger
 var loglevel = mylog.DEBUG
 
-/*
-	TODO: find why server doesnt shut down properly (missing done() or stop handler)
-*/
-
 func main() {
 	var err error
 	logger, err = mylog.NewLogger("Server")

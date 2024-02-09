@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+type contextWithCancel struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
 type Proxy struct {
 	ctx      context.Context
 	config   *tls.Config
@@ -19,11 +24,6 @@ type Proxy struct {
 	exposedPorts   map[int]contextWithCancel
 	exposedPortsNr int
 	ctrlConn       *tls.Conn
-}
-
-type contextWithCancel struct {
-	ctx    context.Context
-	cancel context.CancelFunc
 }
 
 func NewProxy(context context.Context, cancel context.CancelFunc, cfg *tls.Config) *Proxy {
@@ -44,8 +44,8 @@ func (p *Proxy) setConfig(config *tls.Config) {
 
 func (p *Proxy) connectToServer() bool {
 	ip := p.ctx.Value("ip").(net.IP)
-	logger.Log("Connecting to: " + ip.String() + ":" + strconv.Itoa(CTRLPORT))
-	conn, err := tls.Dial("tcp", ip.String()+":"+strconv.Itoa(CTRLPORT), p.config)
+	logger.Log("Connecting to: " + ip.String() + ":" + CTRLPORT)
+	conn, err := tls.Dial("tcp", ip.String()+":"+CTRLPORT, p.config)
 	if err != nil {
 		logger.Error("Error connecting to server: ", err)
 		return false
@@ -73,7 +73,6 @@ func (p *Proxy) handleServerConnection() {
 	for {
 		select {
 		case <-p.ctx.Done():
-
 			return
 		default:
 			err := p.ctrlConn.SetDeadline(time.Now().Add(1 * time.Second))
@@ -83,6 +82,7 @@ func (p *Proxy) handleServerConnection() {
 			}
 			fr, err := frame.ReadFrame(p.ctrlConn)
 			if err != nil {
+				// TODO: handle timeout necessary?
 				logger.Error("Error reading frame from server: ", err)
 				return
 			}
@@ -99,6 +99,7 @@ func (p *Proxy) handleServerConnection() {
 }
 
 func (p *Proxy) startProxy(fr *frame.CTRLFrame) {
+	// TODO: check if the port is actually exposed? Necessary?
 	lPort, err := strconv.Atoi(fr.Data[0])
 	if err != nil {
 		logger.Error("Error startProxy converting lPort number: ", err)
@@ -110,15 +111,17 @@ func (p *Proxy) startProxy(fr *frame.CTRLFrame) {
 		return
 	}
 
+	// Dial remote server on proxy port
 	pConn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: p.ip, Port: pPort})
 	if err != nil {
-		logger.Error("Error startProxy dialing:", err)
+		logger.Error("Error startProxy dialing remote:", err)
 		return
 	}
 
+	// Dial local server
 	lConn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: lPort})
 	if err != nil {
-		logger.Error("Error startProxy dialing:", err)
+		logger.Error("Error startProxy dialing local:", err)
 		return
 	}
 
@@ -143,6 +146,7 @@ func (p *Proxy) relayTcp(conn1, conn2 *net.TCPConn, ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
+			// TODO: do we need timeouts here? Is it possible that the connections are not closed when e.g. unpairing happen?
 			buf := make([]byte, 1024)
 			n, err := conn1.Read(buf)
 			if err != nil {

@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	CTRLPORT int = 47921
+	CTRLPORT string = "47921"
 )
 
 type Client struct {
@@ -93,9 +93,12 @@ func (c *Client) handleCommand(cmd []string) {
 			}
 		}
 		ct := context.WithValue(c.ctx, "ip", ip)
-		ctx, cancel := context.WithCancel(ct)
+		/*
+			The pairingContext is live for the duration of the client being paired to a server.
+		*/
+		pairingCtx, cancel := context.WithCancel(ct)
 		c.proxyCancel = cancel
-		c.proxy = NewProxy(ctx, cancel, c.tlsConfig)
+		c.proxy = NewProxy(pairingCtx, cancel, c.tlsConfig)
 		if !c.proxy.connectToServer() {
 			logger.Error("Error connecting to server", nil)
 			c.proxyCancel()
