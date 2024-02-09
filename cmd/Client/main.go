@@ -17,7 +17,7 @@ var loglevel = mylog.DEBUG
 
 func main() {
 	var err error
-	logger, err = mylog.NewLogger("Server")
+	logger, err = mylog.NewLogger("Client")
 	logger.SetLogLevel(loglevel)
 	if err != nil {
 		panic(err)
