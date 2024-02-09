@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	CTRLPORT     int = 47921
-	TCPPROXYBASE int = 47923
+	CTRLPORT     string = "47921"
+	TCPPROXYBASE int    = 47923
 )
 
 type Server struct {
@@ -26,7 +26,7 @@ type Server struct {
 
 func NewServer(context context.Context) *Server {
 	return &Server{
-		proxy: NewState(),
+		proxy: nil,
 		ctx:   context,
 	}
 }
@@ -44,16 +44,16 @@ func (s *Server) run() {
 		case <-s.ctx.Done():
 			return
 		default:
-			s.proxy.CleanUp()
 			logger.Log("Waiting for client to connect...")
-			conn := s.waitForCtrlConnection()
-			if conn != nil {
-				logger.Log("Client connected: " + conn.RemoteAddr().String())
+			s.waitForCtrlConnection()
+			if s.proxy != nil {
+				logger.Log("Client connected: " + s.proxy.PairedIP.String())
 				// Run a goroutine that will handle all writes to the ctrl connection
 				wg.Add(1)
-				go s.manageCtrlConnectionOutgoing(conn)
+				// TODO: Work from here.
+				go s.manageCtrlConnectionOutgoing()
 				// Keep reading from the ctrl connection till disconnected or closed
-				s.manageCtrlConnectionIncoming(conn)
+				s.manageCtrlConnectionIncoming()
 			}
 		}
 	}
@@ -94,14 +94,14 @@ func (s *Server) prepareTlsConfig() *tls.Config {
 	return tlsConfig
 }
 
-func (s *Server) waitForCtrlConnection() net.Conn {
-	l, err := tls.Listen("tcp", ":"+strconv.Itoa(CTRLPORT), s.config)
+func (s *Server) waitForCtrlConnection() {
+	l, err := tls.Listen("tcp", ":"+CTRLPORT, s.config)
 	if err != nil {
 		logger.Error("Error TLS listening:", err)
-		return nil
+		panic(err)
 	}
-	stopCauseAccept := make(chan struct{})
-	defer close(stopCauseAccept)
+	listeningCtx, cancel := context.WithCancel(s.ctx)
+	defer cancel()
 	defer func(l net.Listener) {
 		if l != nil {
 			logger.Log("DEFER closing listener")
@@ -114,7 +114,7 @@ func (s *Server) waitForCtrlConnection() net.Conn {
 
 	// Run a helper goroutine to close the listener when stop is received from console
 	wg.Add(1)
-	go func(ctx context.Context, stopBecauseAccept chan struct{}, l net.Listener) {
+	go func(ctx context.Context, l net.Listener) {
 		defer wg.Done()
 		for dontClose := true; dontClose; {
 			select {
@@ -126,21 +126,22 @@ func (s *Server) waitForCtrlConnection() net.Conn {
 					logger.Error("Error closing TLS listener:", err)
 				}
 				l = nil
-			case <-stopBecauseAccept:
-				dontClose = false
 			}
 		}
 		return
-	}(s.ctx, stopCauseAccept, l)
+	}(listeningCtx, l)
 
 	conn, err := l.Accept()
 	if err != nil {
 		logger.Error("Error accepting connection:", err)
-		return nil
+		return
 	}
-	s.proxy.PairedIP = conn.RemoteAddr()
-	s.proxy.Paired = true
-	return conn
+
+	newCt := context.WithValue(s.ctx, "addr", conn.RemoteAddr())
+	newCt = context.WithValue(newCt, "conn", conn)
+	proxCtx, cancel := context.WithCancel(newCt)
+	s.proxy = NewProxy(proxCtx, cancel)
+	return
 }
 
 func (s *Server) manageCtrlConnectionOutgoing(conn net.Conn) {

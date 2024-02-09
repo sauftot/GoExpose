@@ -10,18 +10,19 @@ import (
 )
 
 type Proxy struct {
-	Paired       bool
-	PairedIP     net.Addr
-	NetOut       chan *in.CTRLFrame
-	exposedPorts map[int]bool
+	PairedIP net.Addr
+	NetOut   chan *in.CTRLFrame
+	ctx      in.ContextWithCancel
+
+	exposedPorts map[int]in.ContextWithCancel
 	proxyPorts   []int
 }
 
-func NewState() *Proxy {
+func NewProxy(context context.Context, cancel context.CancelFunc) *Proxy {
 	return &Proxy{
-		Paired:       false,
-		exposedPorts: make(map[int]bool),
-		proxyPorts:   make([]int, 10),
+		ctx:        in.ContextWithCancel{Ctx: context, Cancel: cancel},
+		proxyPorts: make([]int, 10),
+		PairedIP:   context.Value("addr").(net.Addr),
 	}
 }
 
