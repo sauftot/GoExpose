@@ -1,4 +1,4 @@
-package ctxWithCancel
+package internal
 
 import "context"
 

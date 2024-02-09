@@ -3,8 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	cwc "example.com/reverseproxy/pkg/ctxWithCancel"
-	"example.com/reverseproxy/pkg/frame"
+	cwc "example.com/reverseproxy/cmd/internal"
 	"fmt"
 	"net"
 	"strconv"
@@ -76,7 +75,7 @@ func (p *Proxy) handleServerConnection() {
 				logger.Error("Error setting deadline: ", err)
 				return
 			}
-			fr, err := frame.ReadFrame(p.ctrlConn)
+			fr, err := cwc.ReadFrame(p.ctrlConn)
 			if err != nil {
 				// TODO: handle timeout necessary?
 				logger.Error("Error reading frame from server: ", err)
@@ -84,9 +83,9 @@ func (p *Proxy) handleServerConnection() {
 			}
 			logger.Log("Received frame from server: " + strconv.Itoa(int(fr.Typ)))
 			switch fr.Typ {
-			case frame.CTRLUNPAIR:
+			case cwc.CTRLUNPAIR:
 				return
-			case frame.CTRLCONNECT:
+			case cwc.CTRLCONNECT:
 				p.startProxy(fr)
 			}
 		}
@@ -94,7 +93,7 @@ func (p *Proxy) handleServerConnection() {
 	}
 }
 
-func (p *Proxy) startProxy(fr *frame.CTRLFrame) {
+func (p *Proxy) startProxy(fr *cwc.CTRLFrame) {
 	// TODO: check if the port is actually exposed? Necessary?
 	lPort, err := strconv.Atoi(fr.Data[0])
 	if err != nil {
@@ -160,8 +159,8 @@ func (p *Proxy) relayTcp(conn1, conn2 *net.TCPConn, ctx context.Context) {
 
 func (p *Proxy) expose(portStr string) {
 	// send the CTRLEXPOSE with the port to the server
-	fr := frame.NewCTRLFrame(frame.CTRLEXPOSETCP, []string{portStr})
-	bytes, err := frame.ToByteArray(fr)
+	fr := cwc.NewCTRLFrame(cwc.CTRLEXPOSETCP, []string{portStr})
+	bytes, err := cwc.ToByteArray(fr)
 	if err != nil {
 		fmt.Println("[ERROR] Error creating CTRLFrame!")
 		return
@@ -192,8 +191,8 @@ func (p *Proxy) hide(portStr string) {
 		return
 	}
 	// send the CTRLHIDE with the port to the server
-	fr := frame.NewCTRLFrame(frame.CTRLHIDETCP, []string{portStr})
-	bytes, err := frame.ToByteArray(fr)
+	fr := cwc.NewCTRLFrame(cwc.CTRLHIDETCP, []string{portStr})
+	bytes, err := cwc.ToByteArray(fr)
 	if err != nil {
 		fmt.Println("[ERROR] Error creating CTRLFrame!")
 		return

@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"example.com/reverseproxy/pkg/console"
+	"example.com/reverseproxy/cmd/internal"
 	mylog "example.com/reverseproxy/pkg/logger"
 	"sync"
 )
@@ -26,7 +26,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	input := make(chan []string, 100)
 
-	go console.InputHandler(cancel, input)
+	go internal.InputHandler(cancel, input)
 	client := NewClient(ctx)
 	wg.Add(1)
 	go client.run(input)

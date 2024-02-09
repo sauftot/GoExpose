@@ -1,4 +1,4 @@
-package frame
+package internal
 
 import (
 	"encoding/json"

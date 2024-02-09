@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"errors"
+	"example.com/reverseproxy/cmd/internal"
 	"example.com/reverseproxy/pkg/frame"
 	"fmt"
 	"net"
@@ -49,16 +50,16 @@ func (n *Networker) manageCtrl() {
 				return
 			}
 		} else {
-			fr, err := frame.FromByteArray(buf)
+			fr, err := internal.FromByteArray(buf)
 			if err != nil {
 				fmt.Println("CONTROLMANAGER: Error decoding control frame:", err.Error())
 			} else {
 				switch fr.Typ {
-				case frame.CTRLUNPAIR:
+				case internal.CTRLUNPAIR:
 					fmt.Println("CONTROLMANAGER: Received unpair signal from RPServer!")
 					n.paired = false
 					return
-				case frame.CTRLCONNECT:
+				case internal.CTRLCONNECT:
 					ip := net.ParseIP(n.ctrlConn.RemoteAddr().String())
 					port, err := strconv.ParseUint(fr.Data[0], 10, 16)
 					if err != nil {
@@ -71,7 +72,7 @@ func (n *Networker) manageCtrl() {
 						continue
 					}
 					n.handoff(toProxy, fr.Data[1])
-				case frame.CTRLHIDETCP:
+				case internal.CTRLHIDETCP:
 					//TODO: received after client send exposetcp but server cant expose any more tcp ports. client should hide the port
 				}
 			}
@@ -195,7 +196,7 @@ func (n *Networker) pair(ip string) error {
 
 // DONE
 func (n *Networker) unpair() error {
-	msg, err := frame.ToByteArray(&frame.CTRLFrame{Typ: frame.CTRLUNPAIR})
+	msg, err := internal.ToByteArray(&internal.CTRLFrame{Typ: internal.CTRLUNPAIR})
 	if err != nil {
 		return errors.New("UNPAIR: failed to create unpair message")
 	} else {
@@ -211,7 +212,7 @@ func (n *Networker) unpair() error {
 // DONE
 func (n *Networker) exposeTCP(port uint16) error {
 	portStr := strconv.Itoa(int(port))
-	msg, err := frame.ToByteArray(&frame.CTRLFrame{Typ: frame.CTRLEXPOSETCP, Data: []string{portStr}})
+	msg, err := internal.ToByteArray(&internal.CTRLFrame{Typ: internal.CTRLEXPOSETCP, Data: []string{portStr}})
 	if err != nil {
 		return errors.New("EXPOSETCP: failed to create expose message")
 	}
@@ -226,7 +227,7 @@ func (n *Networker) exposeTCP(port uint16) error {
 // DONE
 func (n *Networker) hideTCP(port uint16) error {
 	portStr := strconv.Itoa(int(port))
-	msg, err := frame.ToByteArray(&frame.CTRLFrame{Typ: frame.CTRLHIDETCP, Data: []string{portStr}})
+	msg, err := internal.ToByteArray(&internal.CTRLFrame{Typ: internal.CTRLHIDETCP, Data: []string{portStr}})
 	if err != nil {
 		return errors.New("EXPOSETCP: failed to create hide message")
 	}
