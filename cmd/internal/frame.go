@@ -45,7 +45,7 @@ func FromByteArray(jsonBytes []byte) (*CTRLFrame, error) {
 }
 
 func ReadFrame(conn net.Conn) (*CTRLFrame, error) {
-	buf := make([]byte, 1024)
+	buf := make([]byte, 256)
 	n, err := conn.Read(buf)
 	if err != nil {
 		return nil, err

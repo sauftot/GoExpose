@@ -4,11 +4,9 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	in "example.com/reverseproxy/cmd/internal"
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 )
 
 const (
@@ -20,8 +18,7 @@ type Server struct {
 	proxy  *Proxy
 	config *tls.Config
 
-	ctx      context.Context
-	exposers map[int]context.CancelFunc
+	ctx context.Context
 }
 
 func NewServer(context context.Context) *Server {
@@ -50,10 +47,12 @@ func (s *Server) run() {
 				logger.Log("Client connected: " + s.proxy.PairedIP.String())
 				// Run a goroutine that will handle all writes to the ctrl connection
 				wg.Add(1)
-				// TODO: Work from here.
-				go s.manageCtrlConnectionOutgoing()
+				go s.proxy.manageCtrlConnectionOutgoing()
 				// Keep reading from the ctrl connection till disconnected or closed
-				s.manageCtrlConnectionIncoming()
+				s.proxy.manageCtrlConnectionIncoming()
+				// clean up
+				s.proxy = nil
+
 			}
 		}
 	}
@@ -142,110 +141,4 @@ func (s *Server) waitForCtrlConnection() {
 	proxCtx, cancel := context.WithCancel(newCt)
 	s.proxy = NewProxy(proxCtx, cancel)
 	return
-}
-
-func (s *Server) manageCtrlConnectionOutgoing(conn net.Conn) {
-	defer wg.Done()
-	logger.Log("Starting manageCtrlConnectionOutgoing")
-	s.proxy.NetOut = make(chan *in.CTRLFrame, 100)
-	for {
-		select {
-		case <-s.ctx.Done():
-			return
-		case fr := <-s.proxy.NetOut:
-			if fr.Typ == in.STOP {
-				return
-			} else {
-				err := in.WriteFrame(conn, fr)
-				if err != nil {
-					logger.Error("Error writing frame:", err)
-					return
-				}
-				if fr.Typ == in.CTRLUNPAIR {
-					s.proxy.NetOut = make(chan *in.CTRLFrame, 100)
-				}
-			}
-		}
-	}
-}
-
-func (s *Server) manageCtrlConnectionIncoming(conn net.Conn) {
-	defer func(conn net.Conn) {
-		if conn != nil {
-			err := conn.Close()
-			if err != nil {
-
-			}
-		}
-	}(conn)
-	stopCauseConnDead := make(chan struct{})
-	defer close(stopCauseConnDead)
-	logger.Log("Starting manageCtrlConnectionIncoming")
-
-	// Run a helper goroutine to close the connection when stop is received from console
-	wg.Add(1)
-	go func(ctx context.Context, stopCauseConnDead chan struct{}) {
-		wg.Done()
-		for dontClose := true; dontClose; {
-			select {
-			case <-ctx.Done():
-				dontClose = false
-				s.proxy.Paired = false
-				s.proxy.NetOut <- in.NewCTRLFrame(in.CTRLUNPAIR, nil)
-				logger.Log("Closing TLS Conn")
-				s.proxy.NetOut <- in.NewCTRLFrame(in.STOP, nil)
-			case <-stopCauseConnDead:
-				dontClose = false
-			}
-		}
-		return
-	}(s.ctx, stopCauseConnDead)
-
-	for {
-		select {
-		case <-s.ctx.Done():
-			return
-		default:
-			if s.proxy.Paired {
-				s.handleCtrlFrame(conn)
-			} else {
-				logger.Log("IncomingHandler returning due to disconnect")
-				return
-			}
-		}
-	}
-}
-
-func (s *Server) handleCtrlFrame(conn net.Conn) {
-	fr, err := in.ReadFrame(conn)
-	if err != nil {
-		logger.Error("Error reading frame, disconnecting:", err)
-		s.proxy.Paired = false
-		return
-	}
-	logger.Log("Received frame from ctrlConn: " + strconv.Itoa(int(fr.Typ)) + " " + fr.Data[0])
-	switch fr.Typ {
-	case in.CTRLUNPAIR:
-		s.proxy.Paired = false
-	case in.CTRLEXPOSETCP:
-		port, err := strconv.Atoi(fr.Data[0])
-		if err != nil {
-			logger.Error("Error converting port to int:", err)
-			return
-		}
-		c := context.WithValue(s.ctx, "port", port)
-		tcpContext, cancel := context.WithCancel(c)
-		s.exposers[port] = cancel
-		s.proxy.ExposeTcp(tcpContext)
-	case in.CTRLHIDETCP:
-		port, err := strconv.Atoi(fr.Data[0])
-		if err != nil {
-			logger.Error("Error converting port to int:", err)
-			return
-		}
-		if s.exposers[port] != nil {
-			s.exposers[port]()
-			delete(s.exposers, port)
-		}
-	}
 }

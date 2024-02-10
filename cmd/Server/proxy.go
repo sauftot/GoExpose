@@ -26,53 +26,37 @@ func NewProxy(context context.Context, cancel context.CancelFunc) *Proxy {
 	}
 }
 
-func (p *Proxy) ExposeTcp(ctx context.Context) {
+func (p *Proxy) exposeTcpPreChecks(portCtx in.ContextWithCancel) {
 	/*
 		Check if the port is already exposed. If not, start an Exposer for the external port.
 	*/
-	var port = ctx.Value("port").(int)
+	var port = portCtx.Ctx.Value("port").(int)
 	if port < 1024 || port > 65535 {
-		return
-	}
-	if exposed := p.exposedPorts[port]; exposed {
+		portCtx.Cancel()
 		return
 	}
 	if len(p.proxyPorts) >= 10 {
+		logger.Log("Expose rejected! Max number of ports reached")
+		portCtx.Cancel()
 		return
 	}
-
-	p.exposedPorts[port] = true
 	p.proxyPorts = append(p.proxyPorts, port)
 	// Start a listener on the port
 	logger.Log("Starting exposer for port: " + strconv.Itoa(port))
 	wg.Add(1)
-	go p.startExposer(ctx)
+	go p.startExposer(portCtx)
 }
 
-func (p *Proxy) HideTcp(port int) {
-	/*
-		Check if the port is being exposed. If so, stop the listener for external connections and send a signal to all relay
-		goroutines with this port to stop. Remove the port fro the list of exposed ports.
-	*/
-	if port < 1024 || port > 65535 {
-		return
-	}
-	if exposed := p.exposedPorts[port]; !exposed {
-		return
-	}
-	p.exposedPorts[port] = false
-}
-
-func (p *Proxy) startExposer(ctx context.Context) {
-	port := ctx.Value("port").(int)
+func (p *Proxy) startExposer(portCtx in.ContextWithCancel) {
 	defer wg.Done()
+	port := portCtx.Ctx.Value("port").(int)
 	defer func() {
 		for i, o := range p.proxyPorts {
 			if o == port {
 				p.proxyPorts = append(p.proxyPorts[:i], p.proxyPorts[i+1:]...)
 			}
 		}
-		p.exposedPorts[port] = false
+		p.exposedPorts[port] = in.ContextWithCancel{}
 	}()
 	// Accept a connection
 	// Start a listener on a proxy port
@@ -86,9 +70,9 @@ func (p *Proxy) startExposer(ctx context.Context) {
 		return
 	}
 
-	for p.exposedPorts[port] && p.Paired {
+	for {
 		select {
-		case <-ctx.Done():
+		case <-portCtx.Ctx.Done():
 			return
 		default:
 			err = l.SetDeadline(time.Now().Add(1 * time.Second))
@@ -142,9 +126,9 @@ func (p *Proxy) startExposer(ctx context.Context) {
 			logger.Log("Handing off connections to relay goroutines on port: " + strconv.Itoa(port))
 
 			wg.Add(1)
-			go p.relayTcp(extConn, proxConn, ctx)
+			go p.relayTcp(extConn, proxConn, portCtx.Ctx)
 			wg.Add(1)
-			go p.relayTcp(proxConn, extConn, ctx)
+			go p.relayTcp(proxConn, extConn, portCtx.Ctx)
 		}
 	}
 }
@@ -157,7 +141,7 @@ func (p *Proxy) relayTcp(conn1, conn2 *net.TCPConn, ctx context.Context) {
 			return
 		}
 	}()
-	for p.Paired {
+	for {
 		select {
 		case <-ctx.Done():
 			return
@@ -177,11 +161,101 @@ func (p *Proxy) relayTcp(conn1, conn2 *net.TCPConn, ctx context.Context) {
 	}
 }
 
-func (p *Proxy) CleanUp() {
-	p.Paired = false
-	p.PairedIP = nil
-	p.proxyPorts = make([]int, 0)
-	for k := range p.exposedPorts {
-		p.exposedPorts[k] = false
+func (p *Proxy) manageCtrlConnectionOutgoing() {
+	defer wg.Done()
+	logger.Log("Starting manageCtrlConnectionOutgoing")
+	p.NetOut = make(chan *in.CTRLFrame, 100)
+	conn := p.ctx.Ctx.Value("conn").(net.Conn)
+	for {
+		select {
+		case <-p.ctx.Ctx.Done():
+			return
+		case fr := <-p.NetOut:
+			if fr.Typ == in.STOP {
+				return
+			} else {
+				err := in.WriteFrame(conn, fr)
+				if err != nil {
+					logger.Error("Error writing frame:", err)
+					return
+				}
+				if fr.Typ == in.CTRLUNPAIR {
+					p.NetOut = make(chan *in.CTRLFrame, 100)
+				}
+			}
+		}
+	}
+}
+
+func (p *Proxy) manageCtrlConnectionIncoming() {
+	conn := p.ctx.Ctx.Value("conn").(net.Conn)
+	defer func(conn net.Conn) {
+		if conn != nil {
+			err := conn.Close()
+			if err != nil {
+
+			}
+		}
+	}(conn)
+	logger.Log("Starting manageCtrlConnectionIncoming")
+
+	// Run a helper goroutine to close the connection when stop is received from console
+	wg.Add(1)
+	go func() {
+		wg.Done()
+		for {
+			select {
+			case <-p.ctx.Ctx.Done():
+				p.NetOut <- in.NewCTRLFrame(in.CTRLUNPAIR, nil)
+				logger.Log("Closing TLS Conn")
+				p.NetOut <- in.NewCTRLFrame(in.STOP, nil)
+				return
+			}
+		}
+	}()
+
+	for {
+		select {
+		case <-p.ctx.Ctx.Done():
+			return
+		default:
+			p.handleCtrlFrame()
+		}
+	}
+}
+
+func (p *Proxy) handleCtrlFrame() {
+	conn := p.ctx.Ctx.Value("conn").(net.Conn)
+	// blocking read!
+	fr, err := in.ReadFrame(conn)
+	if err != nil {
+		logger.Error("Error reading frame, disconnecting:", err)
+		p.ctx.Cancel()
+		return
+	}
+	logger.Log("Received frame from ctrlConn: " + strconv.Itoa(int(fr.Typ)) + " " + fr.Data[0])
+	switch fr.Typ {
+	case in.CTRLUNPAIR:
+		p.ctx.Cancel()
+	case in.CTRLEXPOSETCP:
+		port, err := strconv.Atoi(fr.Data[0])
+		if err != nil {
+			logger.Error("Error converting port to int:", err)
+			return
+		}
+		ct := context.WithValue(p.ctx.Ctx, "port", port)
+		ct2, cancel := context.WithCancel(ct)
+		portCtx := in.ContextWithCancel{Ctx: ct2, Cancel: cancel}
+		p.exposedPorts[port] = portCtx
+		p.exposeTcpPreChecks(portCtx)
+	case in.CTRLHIDETCP:
+		port, err := strconv.Atoi(fr.Data[0])
+		if err != nil {
+			logger.Error("Error converting port to int:", err)
+			return
+		}
+		if p.exposedPorts[port].Ctx != nil {
+			p.exposedPorts[port].Cancel()
+		}
 	}
 }
