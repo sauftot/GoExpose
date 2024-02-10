@@ -20,9 +20,12 @@ type Proxy struct {
 
 func NewProxy(context context.Context, cancel context.CancelFunc) *Proxy {
 	return &Proxy{
-		ctx:        in.ContextWithCancel{Ctx: context, Cancel: cancel},
-		proxyPorts: make([]int, 10),
-		PairedIP:   context.Value("addr").(net.Addr),
+		PairedIP: context.Value("addr").(net.Addr),
+		NetOut:   make(chan *in.CTRLFrame, 100),
+		ctx:      in.ContextWithCancel{Ctx: context, Cancel: cancel},
+
+		exposedPorts: make(map[int]in.ContextWithCancel),
+		proxyPorts:   make([]int, 0, 10),
 	}
 }
 
@@ -164,7 +167,6 @@ func (p *Proxy) relayTcp(conn1, conn2 *net.TCPConn, ctx context.Context) {
 func (p *Proxy) manageCtrlConnectionOutgoing() {
 	defer wg.Done()
 	logger.Log("Starting manageCtrlConnectionOutgoing")
-	p.NetOut = make(chan *in.CTRLFrame, 100)
 	conn := p.ctx.Ctx.Value("conn").(net.Conn)
 	for {
 		select {

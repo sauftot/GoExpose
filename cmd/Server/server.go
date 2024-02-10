@@ -99,35 +99,23 @@ func (s *Server) waitForCtrlConnection() {
 		logger.Error("Error TLS listening:", err)
 		panic(err)
 	}
-	listeningCtx, cancel := context.WithCancel(s.ctx)
-	defer cancel()
-	defer func(l net.Listener) {
-		if l != nil {
-			logger.Log("DEFER closing listener")
-			err = l.Close()
-			if err != nil {
-				logger.Error("Error closing listener:", err)
-			}
-		}
-	}(l)
+	listeningCtx, listCancel := context.WithCancel(s.ctx)
+	defer listCancel()
 
 	// Run a helper goroutine to close the listener when stop is received from console
-	wg.Add(1)
 	go func(ctx context.Context, l net.Listener) {
-		defer wg.Done()
-		for dontClose := true; dontClose; {
+		for {
 			select {
 			case <-ctx.Done():
-				dontClose = false
 				logger.Log("Closing TLS listener")
 				err := l.Close()
 				if err != nil {
 					logger.Error("Error closing TLS listener:", err)
 				}
 				l = nil
+				return
 			}
 		}
-		return
 	}(listeningCtx, l)
 
 	conn, err := l.Accept()
@@ -136,8 +124,8 @@ func (s *Server) waitForCtrlConnection() {
 		return
 	}
 
-	newCt := context.WithValue(s.ctx, "addr", conn.RemoteAddr())
-	newCt = context.WithValue(newCt, "conn", conn)
+	nt := context.WithValue(s.ctx, "addr", conn.RemoteAddr())
+	newCt := context.WithValue(nt, "conn", conn)
 	proxCtx, cancel := context.WithCancel(newCt)
 	s.proxy = NewProxy(proxCtx, cancel)
 	return

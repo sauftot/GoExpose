@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	in "example.com/reverseproxy/cmd/internal"
 	"fmt"
 	"net"
@@ -14,7 +15,6 @@ type Proxy struct {
 	ctx      context.Context
 	config   *tls.Config
 	ctxClose context.CancelFunc
-	ip       net.IP
 
 	exposedPorts   map[int]in.ContextWithCancel
 	exposedPortsNr int
@@ -77,9 +77,13 @@ func (p *Proxy) handleServerConnection() {
 			}
 			fr, err := in.ReadFrame(p.ctrlConn)
 			if err != nil {
-				// TODO: handle timeout necessary?
-				logger.Error("Error reading frame from server: ", err)
-				return
+				var netErr net.Error
+				if errors.As(err, &netErr) && netErr.Timeout() {
+					continue
+				} else {
+					logger.Error("Error reading frame from server: ", err)
+					return
+				}
 			}
 			logger.Log("Received frame from server: " + strconv.Itoa(int(fr.Typ)))
 			switch fr.Typ {
@@ -107,7 +111,7 @@ func (p *Proxy) startProxy(fr *in.CTRLFrame) {
 	}
 
 	// Dial remote server on proxy port
-	pConn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: p.ip, Port: pPort})
+	pConn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: p.ctx.Value("ip").(net.IP), Port: pPort})
 	if err != nil {
 		logger.Error("Error startProxy dialing remote:", err)
 		return

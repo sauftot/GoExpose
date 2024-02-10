@@ -13,6 +13,12 @@ var wg sync.WaitGroup
 var logger *mylog.Logger
 var loglevel = mylog.DEBUG
 
+/*
+	STATUS:
+		- 2024-02-10: Proxying is working.
+		//TODO: find cause for unreliable shutdown, improve logging, add tests
+*/
+
 func main() {
 	var err error
 	logger, err = mylog.NewLogger("Server")
@@ -26,21 +32,14 @@ func main() {
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
-	go func(signals chan os.Signal, cancelFunc context.CancelFunc) {
-		for {
-			select {
-			case <-signals:
-				logger.Log("Received signal!")
-				cancel()
-				return
-			}
-		}
-	}(signals, cancel)
 
 	server := NewServer(ctx)
 	wg.Add(1)
 	go server.run()
 
+	<-signals
+	cancel()
+	logger.Log("Received SIGINT/SIGTERM. Stopping server...")
 	wg.Wait()
 	logger.Log("Server stopped")
 }

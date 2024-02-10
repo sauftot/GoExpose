@@ -12,7 +12,9 @@ var logger *mylog.Logger
 var loglevel = mylog.DEBUG
 
 /*
-	TODO: find why client doesnt shut down after it was conected to a server and exit was called (probably: missing done() or stop handler)
+	STATUS:
+		- 2024-02-10: Proxying is working.
+		//TODO: improve logging, add tests
 */
 
 func main() {
