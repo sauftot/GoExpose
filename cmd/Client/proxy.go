@@ -98,7 +98,6 @@ func (p *Proxy) handleServerConnection() {
 }
 
 func (p *Proxy) startProxy(fr *in.CTRLFrame) {
-	// TODO: check if the port is actually exposed? Necessary?
 	lPort, err := strconv.Atoi(fr.Data[0])
 	if err != nil {
 		logger.Error("Error startProxy converting lPort number: ", err)
@@ -145,12 +144,16 @@ func (p *Proxy) relayTcp(conn1, conn2 *net.TCPConn, ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
-			// TODO: do we need timeouts here? Is it possible that the connections are not closed when e.g. unpairing happen?
+			err := conn1.SetDeadline(time.Now().Add(1 * time.Second))
 			buf := make([]byte, 1024)
 			n, err := conn1.Read(buf)
 			if err != nil {
-				logger.Error("Error relay reading from external connection:", err)
-				return
+				if err.(net.Error).Timeout() {
+					continue
+				} else {
+					logger.Error("Error relay reading from external connection:", err)
+					return
+				}
 			}
 			_, err = conn2.Write(buf[:n])
 			if err != nil {
