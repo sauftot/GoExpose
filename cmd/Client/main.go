@@ -14,7 +14,7 @@ var loglevel = mylog.DEBUG
 /*
 	STATUS:
 		- 2024-02-10: Proxying is working.
-		//TODO: improve logging, add tests
+		//TODO: add functionality to add and remove rules to ufw from the server. This will require root, hence this should depend on a command line argument or a config file.
 */
 
 func main() {
