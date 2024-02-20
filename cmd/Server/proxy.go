@@ -46,6 +46,7 @@ func (p *Proxy) exposeTcpPreChecks(portCtx in.ContextWithCancel) {
 	p.proxyPorts = append(p.proxyPorts, port)
 	// Start a listener on the port
 	logger.Log("Starting exposer for port: " + strconv.Itoa(port))
+
 	wg.Add(1)
 	go p.startExposer(portCtx)
 }
@@ -61,6 +62,9 @@ func (p *Proxy) startExposer(portCtx in.ContextWithCancel) {
 		}
 		p.exposedPorts[port] = in.ContextWithCancel{}
 	}(port)
+
+	// TODO: check and use ufw to open the port
+
 	// Accept a connection
 	// Start a listener on a proxy port
 	// Send CTRLCONNECT with the proxy port to the client
