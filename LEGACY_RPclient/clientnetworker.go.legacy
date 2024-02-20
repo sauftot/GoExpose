@@ -73,7 +73,7 @@ func (n *Networker) manageCtrl() {
 					}
 					n.handoff(toProxy, fr.Data[1])
 				case internal.CTRLHIDETCP:
-					//TODO: received after client send exposetcp but server cant expose any more tcp ports. client should hide the port
+
 				}
 			}
 		}
@@ -239,12 +239,12 @@ func (n *Networker) hideTCP(port uint16) error {
 	return nil
 }
 
-// TODO: implement
+
 func (n *Networker) exposeUDP(port uint16) error {
 	return nil
 }
 
-// TODO: implement
+
 func (n *Networker) hideUDP(port uint16) error {
 	return nil
 }
