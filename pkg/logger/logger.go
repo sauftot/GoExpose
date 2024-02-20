@@ -46,18 +46,18 @@ func (l *Logger) SetLogLevel(level uint8) {
 
 // Log method logs a message with the Logger instance.
 // It takes a message as input and logs it to the console and/or file depending on the loglevel of the Logger.
-func (l *Logger) Log(msg string) {
+func (l *Logger) Log(msg string, args ...any) {
 	if l.loglevel == DEBUG {
-		l.consoleLogger.Debug(msg)
-		l.fileLogger.Debug(msg)
+		l.consoleLogger.Debug(msg, args...)
+		l.fileLogger.Debug(msg, args...)
 	} else if l.loglevel == INFO {
-		l.fileLogger.Info(msg)
+		l.fileLogger.Info(msg, args...)
 	}
 }
 
 // Error method logs an error message with the Logger instance.
 // It takes a message and an error as input and logs them to the console and file.
-func (l *Logger) Error(msg string, err error) {
-	l.consoleLogger.Error(msg, err)
-	l.fileLogger.Error(msg, err)
+func (l *Logger) Error(msg string, args ...any) {
+	l.consoleLogger.Error(msg, args...)
+	l.fileLogger.Error(msg, args...)
 }

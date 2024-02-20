@@ -149,11 +149,17 @@ func (p *Proxy) relayTcp(conn1, conn2 *net.TCPConn, ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
+			err := conn1.SetDeadline(time.Now().Add(1 * time.Second))
 			buf := make([]byte, 1024)
 			n, err := conn1.Read(buf)
 			if err != nil {
-				logger.Error("Error relay reading from external connection:", err)
-				return
+				var netErr net.Error
+				if errors.As(err, &netErr) && netErr.Timeout() {
+					continue
+				} else {
+					logger.Error("Error relay reading from connection:", err)
+					return
+				}
 			}
 			_, err = conn2.Write(buf[:n])
 			if err != nil {
