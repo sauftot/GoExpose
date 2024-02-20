@@ -209,16 +209,20 @@ func (p *Proxy) manageCtrlConnectionIncoming() {
 
 	// Run a helper goroutine to close the connection when stop is received from console
 	wg.Add(1)
-	go func() {
+	go func(conn net.Conn) {
 		defer wg.Done()
 		logger.Debug("mCCI subroutine: Waiting for ctx to be done")
 		<-p.ctx.Ctx.Done()
 		p.NetOut <- in.NewCTRLFrame(in.CTRLUNPAIR, nil)
 		logger.Log("Closing TLS Conn")
 		p.NetOut <- in.NewCTRLFrame(in.STOP, nil)
+		err := conn.Close()
+		if err != nil {
+			logger.Error("Error closing TLS conn:", err)
+		}
 		logger.Debug("mCCI subroutine: Ctx done")
 		return
-	}()
+	}(conn)
 
 	for {
 		select {
