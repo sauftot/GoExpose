@@ -16,7 +16,6 @@ var loglevel = mylog.DEBUG
 /*
 	STATUS:
 		- 2024-02-10: Proxying is working.
-		//TODO: found and fixed causes for improper shutdown, do testing and verify fix.
 */
 
 func main() {
