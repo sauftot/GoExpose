@@ -103,7 +103,9 @@ func (s *Server) waitForCtrlConnection() {
 	defer listCancel()
 
 	// Run a helper goroutine to close the listener when stop is received from console
+	wg.Add(1)
 	go func(ctx context.Context, l net.Listener) {
+		defer wg.Done()
 		logger.Debug("Starting TLS listener")
 		<-ctx.Done()
 		logger.Log("Closing TLS listener")

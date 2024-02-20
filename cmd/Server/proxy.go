@@ -53,14 +53,14 @@ func (p *Proxy) exposeTcpPreChecks(portCtx in.ContextWithCancel) {
 func (p *Proxy) startExposer(portCtx in.ContextWithCancel) {
 	defer wg.Done()
 	port := portCtx.Ctx.Value("port").(int)
-	defer func() {
+	defer func(port int) {
 		for i, o := range p.proxyPorts {
 			if o == port {
 				p.proxyPorts = append(p.proxyPorts[:i], p.proxyPorts[i+1:]...)
 			}
 		}
 		p.exposedPorts[port] = in.ContextWithCancel{}
-	}()
+	}(port)
 	// Accept a connection
 	// Start a listener on a proxy port
 	// Send CTRLCONNECT with the proxy port to the client
@@ -210,16 +210,14 @@ func (p *Proxy) manageCtrlConnectionIncoming() {
 	// Run a helper goroutine to close the connection when stop is received from console
 	wg.Add(1)
 	go func() {
-		wg.Done()
-		for {
-			select {
-			case <-p.ctx.Ctx.Done():
-				p.NetOut <- in.NewCTRLFrame(in.CTRLUNPAIR, nil)
-				logger.Log("Closing TLS Conn")
-				p.NetOut <- in.NewCTRLFrame(in.STOP, nil)
-				return
-			}
-		}
+		defer wg.Done()
+		logger.Debug("mCCI subroutine: Waiting for ctx to be done")
+		<-p.ctx.Ctx.Done()
+		p.NetOut <- in.NewCTRLFrame(in.CTRLUNPAIR, nil)
+		logger.Log("Closing TLS Conn")
+		p.NetOut <- in.NewCTRLFrame(in.STOP, nil)
+		logger.Debug("mCCI subroutine: Ctx done")
+		return
 	}()
 
 	for {
