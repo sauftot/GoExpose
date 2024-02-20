@@ -55,6 +55,17 @@ func (l *Logger) Log(msg string, args ...any) {
 	}
 }
 
+func (l *Logger) Debug(msg string, args ...any) {
+	if l.loglevel == DEBUG {
+		l.consoleLogger.Debug(msg, args...)
+		l.fileLogger.Debug(msg, args...)
+	}
+}
+
+func (l *Logger) Info(msg string, args ...any) {
+	l.fileLogger.Info(msg, args...)
+}
+
 // Error method logs an error message with the Logger instance.
 // It takes a message and an error as input and logs them to the console and file.
 func (l *Logger) Error(msg string, args ...any) {
