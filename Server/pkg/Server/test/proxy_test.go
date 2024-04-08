@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"sync"
 	"testing"
 	"time"
 )
@@ -41,7 +40,6 @@ func TestTcpRelay(t *testing.T) {
 
 	ctx, cnl := context.WithCancel(context.Background())
 	defer cnl()
-	testwg := new(sync.WaitGroup)
 
 	extGoExpose, extExt := createConnPair(40001)
 	defer extGoExpose.Close()
@@ -63,10 +61,8 @@ func TestTcpRelay(t *testing.T) {
 
 	p := server.NewProxy(dummyconn, setupTestLogger())
 
-	testwg.Add(1)
-	go p.RelayTcp(proxGoExpose, extGoExpose, ctx, testwg)
-	testwg.Add(1)
-	go p.RelayTcp(extGoExpose, proxGoExpose, ctx, testwg)
+	go p.RelayTcp(proxGoExpose, extGoExpose, ctx)
+	go p.RelayTcp(extGoExpose, proxGoExpose, ctx)
 
 	// give the routine some time to start up
 	time.Sleep(100 * time.Millisecond)
@@ -103,12 +99,6 @@ func TestTcpRelay(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected error, got nil")
 	}
-
-	t.Log("Waiting for routines to close")
-
-	time.Sleep(200 * time.Millisecond)
-
-	// wg.Wait() does not work in tests anymore WAFUD
 
 	t.Log("TCP Relay test passed")
 

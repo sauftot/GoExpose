@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net"
 	"strconv"
-	"sync"
 	"time"
 )
 
@@ -40,7 +39,7 @@ func NewProxy(conn net.Conn, logger *slog.Logger) *Proxy {
 	}
 }
 
-func (p *Proxy) exposeTcpPreChecks(ctx context.Context, externalPort int, wg *sync.WaitGroup) {
+func (p *Proxy) exposeTcpPreChecks(ctx context.Context, externalPort int) {
 	// Parse the port and check if it is within the valid range
 	if externalPort < 1024 || externalPort > 65535 {
 		return
@@ -58,12 +57,10 @@ func (p *Proxy) exposeTcpPreChecks(ctx context.Context, externalPort int, wg *sy
 	p.logger.Debug("Starting exposer", "Port", strconv.Itoa(externalPort))
 	portCtx, cnl := context.WithCancel(ctx)
 	p.exposedTcpPorts[externalPort] = Relay{proxyPort: proxyPort, cnl: cnl}
-	wg.Add(1)
-	go p.runExposerForPort(portCtx, externalPort, proxyPort, wg)
+	go p.runExposerForPort(portCtx, externalPort, proxyPort)
 }
 
-func (p *Proxy) runExposerForPort(ctx context.Context, externalPort int, proxyPort int, wg *sync.WaitGroup) {
-	defer wg.Done()
+func (p *Proxy) runExposerForPort(ctx context.Context, externalPort int, proxyPort int) {
 	l, err := net.ListenTCP("tcp", &net.TCPAddr{Port: externalPort})
 	if err != nil {
 		p.logger.Error("Error exposer listening", "Error", err)
@@ -122,16 +119,13 @@ func (p *Proxy) runExposerForPort(ctx context.Context, externalPort int, proxyPo
 			// hand off the connections to RelayTcp
 			p.logger.Debug("Handing off connections to relay goroutines", "Port", strconv.Itoa(externalPort))
 
-			wg.Add(1)
-			go p.RelayTcp(extConn, proxConn, ctx, wg)
-			wg.Add(1)
-			go p.RelayTcp(proxConn, extConn, ctx, wg)
+			go p.RelayTcp(extConn, proxConn, ctx)
+			go p.RelayTcp(proxConn, extConn, ctx)
 		}
 	}
 }
 
-func (p *Proxy) RelayTcp(conn1, conn2 *net.TCPConn, ctx context.Context, wg *sync.WaitGroup) {
-	defer wg.Done()
+func (p *Proxy) RelayTcp(conn1, conn2 *net.TCPConn, ctx context.Context) {
 	defer func() {
 		_ = conn1.Close()
 		_ = conn2.Close()
@@ -154,8 +148,7 @@ func (p *Proxy) RelayTcp(conn1, conn2 *net.TCPConn, ctx context.Context, wg *syn
 	}
 }
 
-func (p *Proxy) manageCtrlConnectionOutgoing(ctx context.Context, wg *sync.WaitGroup) {
-	defer wg.Done()
+func (p *Proxy) manageCtrlConnectionOutgoing(ctx context.Context) {
 	p.logger.Debug("Starting manageCtrlConnectionOutgoing")
 	for {
 		select {
@@ -178,7 +171,7 @@ func (p *Proxy) manageCtrlConnectionOutgoing(ctx context.Context, wg *sync.WaitG
 	}
 }
 
-func (p *Proxy) manageCtrlConnectionIncoming(ctx context.Context, wg *sync.WaitGroup) {
+func (p *Proxy) manageCtrlConnectionIncoming(ctx context.Context) {
 	p.logger.Debug("Starting manageCtrlConnectionIncoming")
 	// this context synchronizes all proxies to the connection of the CtrlConn. If it terminates, all proxies will be closed.
 	connCtx, cancel := context.WithCancel(ctx)
@@ -186,9 +179,7 @@ func (p *Proxy) manageCtrlConnectionIncoming(ctx context.Context, wg *sync.WaitG
 	defer cancel()
 
 	// Run a helper goroutine to close the connection when stop is received from console
-	wg.Add(1)
 	go func(conn net.Conn) {
-		defer wg.Done()
 		p.logger.Debug("mCCI subroutine: Waiting for ctx to be done")
 		<-connCtx.Done()
 		p.NetOut <- in.NewCTRLFrame(in.CTRLUNPAIR, nil)
@@ -207,12 +198,12 @@ func (p *Proxy) manageCtrlConnectionIncoming(ctx context.Context, wg *sync.WaitG
 		case <-connCtx.Done():
 			return
 		default:
-			p.handleCtrlFrame(connCtx, cancel, wg)
+			p.handleCtrlFrame(connCtx, cancel)
 		}
 	}
 }
 
-func (p *Proxy) handleCtrlFrame(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup) {
+func (p *Proxy) handleCtrlFrame(ctx context.Context, cancel context.CancelFunc) {
 	// blocking read!
 	fr, err := in.ReadFrame(p.CtrlConn)
 	if err != nil {
@@ -232,7 +223,7 @@ func (p *Proxy) handleCtrlFrame(ctx context.Context, cancel context.CancelFunc, 
 			p.logger.Error("Error converting port to int", "Error", err)
 			return
 		}
-		p.exposeTcpPreChecks(ctx, port, wg)
+		p.exposeTcpPreChecks(ctx, port)
 	case in.CTRLHIDETCP:
 		p.logger.Info("Received hidetcp command", slog.String("port", fr.Data[0]))
 		port, err := strconv.Atoi(fr.Data[0])
