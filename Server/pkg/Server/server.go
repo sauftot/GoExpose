@@ -21,7 +21,7 @@ type Server struct {
 	Logger *slog.Logger
 }
 
-func (s *Server) run(context context.Context) {
+func (s *Server) Run(context context.Context) {
 	config := s.prepareTlsConfig()
 	if config == nil {
 		s.Logger.Error("Error preparing TLS config:", nil)

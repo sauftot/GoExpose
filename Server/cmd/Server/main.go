@@ -91,7 +91,7 @@ func main() {
 		Logger: logger,
 	}
 	wg.Add(1)
-	go server.run(ctx)
+	go server.Run(ctx)
 
 	<-signals
 	cancel()
