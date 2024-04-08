@@ -1,8 +1,7 @@
-package Client
+package main
 
 import (
 	"context"
-	"example.com/reverseproxy/cmd/internal"
 	mylog "example.com/reverseproxy/pkg/logger"
 	"sync"
 )

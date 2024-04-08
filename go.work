@@ -1,7 +1,7 @@
 go 1.22
 
 use (
-	./cmd/Client
-	./cmd/Server
-	./cmd/Utils
+	./Server/cmd/Server
+	./Server/pkg/Server
+	./Utils
 )
