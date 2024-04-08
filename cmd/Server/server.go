@@ -4,61 +4,50 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
 )
 
 const (
-	CTRLPORT     string = "47921"
-	TCPPROXYBASE int    = 47923
+	CTRLPORT       string = "47921"
+	TCPPROXYBASE   int    = 47923
+	TCPPROXYAMOUNT int    = 10
 )
 
 type Server struct {
-	proxy  *Proxy
-	config *tls.Config
-
-	ctx context.Context
+	proxy *Proxy
 }
 
-func NewServer(context context.Context) *Server {
-	return &Server{
-		proxy: nil,
-		ctx:   context,
-	}
-}
-
-func (s *Server) run() {
+func (s *Server) run(context context.Context) {
 	defer wg.Done()
-	s.config = s.prepareTlsConfig()
-	if s.config == nil {
+	config := prepareTlsConfig()
+	if config == nil {
 		logger.Error("Error preparing TLS config:", nil)
 		return
 	}
 
 	for {
 		select {
-		case <-s.ctx.Done():
+		case <-context.Done():
 			return
 		default:
-			logger.Log("Waiting for client to connect...")
-			s.waitForCtrlConnection()
-			if s.proxy != nil {
-				logger.Log("Client connected: " + s.proxy.PairedIP.String())
-				// Run a goroutine that will handle all writes to the ctrl connection
-				wg.Add(1)
-				go s.proxy.manageCtrlConnectionOutgoing()
-				// Keep reading from the ctrl connection till disconnected or closed
-				s.proxy.manageCtrlConnectionIncoming()
-				// clean up
-				s.proxy = nil
-
-			}
+			logger.Info("Waiting for client to connect", slog.String("Port", CTRLPORT))
+			s.waitForCtrlConnection(context, config)
+			logger.Info("Client connected", slog.String("IP", s.proxy.CtrlConn.RemoteAddr().String()))
+			// Run a goroutine that will handle all writes to the ctrl connection
+			wg.Add(1)
+			go s.proxy.manageCtrlConnectionOutgoing(context)
+			// Keep reading from the ctrl connection till disconnected or closed
+			s.proxy.manageCtrlConnectionIncoming(context)
+			logger.Info("Client disconnected", slog.String("IP", s.proxy.CtrlConn.RemoteAddr().String()))
+			// clean up
 		}
 	}
 }
 
-func (s *Server) prepareTlsConfig() *tls.Config {
+func prepareTlsConfig() *tls.Config {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		logger.Error("Error getting home directory:", err)
@@ -88,18 +77,19 @@ func (s *Server) prepareTlsConfig() *tls.Config {
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cer},
 		ClientCAs:    caCertPool,
-		ClientAuth:   tls.RequireAndVerifyClientCert,
+		// The main purpose of this is to verify the client certificate
+		ClientAuth: tls.RequireAndVerifyClientCert,
 	}
 	return tlsConfig
 }
 
-func (s *Server) waitForCtrlConnection() {
-	l, err := tls.Listen("tcp", ":"+CTRLPORT, s.config)
+func (s *Server) waitForCtrlConnection(ctx context.Context, config *tls.Config) {
+	l, err := tls.Listen("tcp", ":"+CTRLPORT, config)
 	if err != nil {
-		logger.Error("Error TLS listening:", err)
+		logger.Error("Error TLS listening", slog.String("Port", CTRLPORT), "Error", err)
 		panic(err)
 	}
-	listeningCtx, listCancel := context.WithCancel(s.ctx)
+	listeningCtx, listCancel := context.WithCancel(ctx)
 	defer listCancel()
 
 	// Run a helper goroutine to close the listener when stop is received from console
@@ -108,10 +98,10 @@ func (s *Server) waitForCtrlConnection() {
 		defer wg.Done()
 		logger.Debug("Starting TLS listener")
 		<-ctx.Done()
-		logger.Log("Closing TLS listener")
+		logger.Debug("Closing TLS listener")
 		err := l.Close()
 		if err != nil {
-			logger.Error("Error closing TLS listener:", err)
+			logger.Debug("Error closing TLS listener:", err)
 		}
 		l = nil
 		logger.Debug("Stopping TLS listener")
@@ -119,13 +109,12 @@ func (s *Server) waitForCtrlConnection() {
 
 	conn, err := l.Accept()
 	if err != nil {
-		logger.Error("Error accepting connection:", err)
+		logger.Debug("Error accepting connection:", err)
 		return
 	}
 
-	nt := context.WithValue(s.ctx, "addr", conn.RemoteAddr())
-	newCt := context.WithValue(nt, "conn", conn)
-	proxCtx, cancel := context.WithCancel(newCt)
-	s.proxy = NewProxy(proxCtx, cancel)
+	logger.Debug("Accepted connection, starting proxy", slog.String("Address", conn.RemoteAddr().String()))
+
+	s.proxy = NewProxy(conn)
 	return
 }

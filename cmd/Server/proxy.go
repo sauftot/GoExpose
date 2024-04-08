@@ -4,107 +4,94 @@ import (
 	"context"
 	"errors"
 	in "example.com/reverseproxy/cmd/internal"
+	"log/slog"
 	"net"
 	"strconv"
 	"time"
 )
 
+/*
+	Proxy structs handle one GoExpose client on the server side. Currently, GoExpose is limited to one client per server.
+
+*/
+
 type Proxy struct {
-	PairedIP net.Addr
+	CtrlConn net.Conn
 	NetOut   chan *in.CTRLFrame
-	ctx      in.ContextWithCancel
 
-	exposedPorts map[int]in.ContextWithCancel
-	proxyPorts   []int
+	exposedTcpPorts map[int]Relay
+	exposedUdpPorts map[int]Relay
+	proxyPorts      *Portqueue
 }
 
-func NewProxy(context context.Context, cancel context.CancelFunc) *Proxy {
+func NewProxy(conn net.Conn) *Proxy {
 	return &Proxy{
-		PairedIP: context.Value("addr").(net.Addr),
+		CtrlConn: conn,
 		NetOut:   make(chan *in.CTRLFrame, 100),
-		ctx:      in.ContextWithCancel{Ctx: context, Cancel: cancel},
 
-		exposedPorts: make(map[int]in.ContextWithCancel),
-		proxyPorts:   make([]int, 0, 10),
+		exposedTcpPorts: make(map[int]Relay),
+		exposedUdpPorts: make(map[int]Relay),
+		proxyPorts:      NewPortqueue(),
 	}
 }
 
-func (p *Proxy) exposeTcpPreChecks(portCtx in.ContextWithCancel) {
-	/*
-		Check if the port is already exposed. If not, start an Exposer for the external port.
-	*/
-	var port = portCtx.Ctx.Value("port").(int)
-	if port < 1024 || port > 65535 {
-		portCtx.Cancel()
+func (p *Proxy) exposeTcpPreChecks(ctx context.Context, externalPort int) {
+	// Parse the port and check if it is within the valid range
+	if externalPort < 1024 || externalPort > 65535 {
 		return
 	}
-	if len(p.proxyPorts) >= 10 {
-		logger.Log("Expose rejected! Max number of ports reached")
-		portCtx.Cancel()
+	// Check if the port is already exposed
+	if _, ok := p.exposedTcpPorts[externalPort]; ok {
 		return
 	}
-	p.proxyPorts = append(p.proxyPorts, port)
-	// Start a listener on the port
-	logger.Log("Starting exposer for port: " + strconv.Itoa(port))
+	// Check if there are any available proxy ports
+	proxyPort := p.proxyPorts.GetPort()
+	if proxyPort == 0 {
+		// No available proxy ports
+		return
+	}
+	logger.Debug("Starting exposer", "Port", strconv.Itoa(externalPort))
+	portCtx, cnl := context.WithCancel(ctx)
+	p.exposedTcpPorts[externalPort] = Relay{proxyPort: proxyPort, cnl: cnl}
 	wg.Add(1)
-	go p.startExposer(portCtx)
+	go p.runExposerForPort(portCtx, externalPort, proxyPort)
 }
 
-func (p *Proxy) startExposer(portCtx in.ContextWithCancel) {
+func (p *Proxy) runExposerForPort(ctx context.Context, externalPort int, proxyPort int) {
 	defer wg.Done()
-	port := portCtx.Ctx.Value("port").(int)
-	defer func(port int) {
-		for i, o := range p.proxyPorts {
-			if o == port {
-				p.proxyPorts = append(p.proxyPorts[:i], p.proxyPorts[i+1:]...)
-			}
-		}
-		p.exposedPorts[port] = in.ContextWithCancel{}
-	}(port)
-	// Accept a connection
-	// Start a listener on a proxy port
-	// Send CTRLCONNECT with the proxy port to the client
-	// Wait for the client to connect to the proxy port
-	// Hand off the external connection and the connection to the client to relay goroutines
-	var proxyPort int
-	l, err := net.ListenTCP("tcp", &net.TCPAddr{Port: port})
+	l, err := net.ListenTCP("tcp", &net.TCPAddr{Port: externalPort})
 	if err != nil {
-		logger.Error("Error exposer listening:", err)
+		logger.Error("Error exposer listening", "Error", err)
 		return
 	}
+	defer p.hidePort(externalPort)
+
+	go func(ctx context.Context, l *net.TCPListener) {
+		<-ctx.Done()
+		err := l.Close()
+		if err != nil {
+			logger.Error("Error exposer closing listener", "Error", err)
+		}
+	}(ctx, l)
 
 	for {
 		select {
-		case <-portCtx.Ctx.Done():
+		case <-ctx.Done():
 			return
 		default:
-			err = l.SetDeadline(time.Now().Add(1 * time.Second))
-			if err != nil {
-				logger.Error("Error exposer setting deadline:", err)
-				return
-			}
 			extConn, err := l.AcceptTCP()
 			if err != nil {
-				if netErr := err.(net.Error); netErr.Timeout() {
-					// healthy timeout
-					continue
-				} else {
-					logger.Error("Error exposer accepting external connection:", err)
-					return
-				}
+				logger.Error("Error exposer accepting external connection", "Error", err)
+				return
 			}
-			for i := 0; i < len(p.proxyPorts); i++ {
-				if p.proxyPorts[i] == port {
-					proxyPort = TCPPROXYBASE + i
-				}
-			}
+			logger.Debug("Accepted external connection", slog.Int("Port", externalPort))
 			// Start a listener on the proxy port
 			lProxy, err := net.ListenTCP("tcp", &net.TCPAddr{Port: proxyPort})
 			if err != nil {
-				logger.Error("Error exposer listening on proxy port:", err)
+				logger.Error("Error exposer listening on proxy port", "Error", err)
 				return
 			}
-			p.NetOut <- in.NewCTRLFrame(in.CTRLCONNECT, []string{strconv.Itoa(port),
+			p.NetOut <- in.NewCTRLFrame(in.CTRLCONNECT, []string{strconv.Itoa(externalPort),
 				strconv.Itoa(proxyPort)})
 
 			// Client has 2 seconds to connect to the proxy port
@@ -118,32 +105,34 @@ func (p *Proxy) startExposer(portCtx in.ContextWithCancel) {
 				logger.Error("Error exposer accepting proxy connection:", err)
 				return
 			}
+
+			// Check if the IPs match with CtrlConn
 			ip1, _, _ := net.SplitHostPort(proxConn.RemoteAddr().String())
-			ip2, _, _ := net.SplitHostPort(p.PairedIP.String())
+			ip2, _, _ := net.SplitHostPort(p.CtrlConn.RemoteAddr().String())
 
 			if ip1 != ip2 {
-				logger.Error("Error: IP mismatch", errors.New("IP mismatch"))
+				logger.Error("Error: IP mismatch", "IP1", ip1, "IP2", ip2)
 				return
 			}
 			// hand off the connections to relayTcp
-			logger.Log("Handing off connections to relay goroutines on port: " + strconv.Itoa(port))
+			logger.Debug("Handing off connections to relay goroutines", "Port", strconv.Itoa(externalPort))
 
 			wg.Add(1)
-			go p.relayTcp(extConn, proxConn, portCtx.Ctx)
+			go p.relayTcp(extConn, proxConn, ctx)
 			wg.Add(1)
-			go p.relayTcp(proxConn, extConn, portCtx.Ctx)
+			go p.relayTcp(proxConn, extConn, ctx)
 		}
 	}
 }
 
 func (p *Proxy) relayTcp(conn1, conn2 *net.TCPConn, ctx context.Context) {
 	defer wg.Done()
-	defer func() {
-		err := conn1.Close()
+	defer func(conn *net.TCPConn) {
+		err := conn.Close()
 		if err != nil {
 			return
 		}
-	}()
+	}(conn1)
 	for {
 		select {
 		case <-ctx.Done():
@@ -157,32 +146,31 @@ func (p *Proxy) relayTcp(conn1, conn2 *net.TCPConn, ctx context.Context) {
 				if errors.As(err, &netErr) && netErr.Timeout() {
 					continue
 				} else {
-					logger.Error("Error relay reading from connection:", err)
+					logger.Error("Error relay reading from connection", "Error", err)
 					return
 				}
 			}
 			_, err = conn2.Write(buf[:n])
 			if err != nil {
-				logger.Error("Error relay writing to proxy connection:", err)
+				logger.Error("Error relay writing to proxy connection", "Error", err)
 				return
 			}
 		}
 	}
 }
 
-func (p *Proxy) manageCtrlConnectionOutgoing() {
+func (p *Proxy) manageCtrlConnectionOutgoing(ctx context.Context) {
 	defer wg.Done()
-	logger.Log("Starting manageCtrlConnectionOutgoing")
-	conn := p.ctx.Ctx.Value("conn").(net.Conn)
+	logger.Debug("Starting manageCtrlConnectionOutgoing")
 	for {
 		select {
-		case <-p.ctx.Ctx.Done():
+		case <-ctx.Done():
 			return
 		case fr := <-p.NetOut:
 			if fr.Typ == in.STOP {
 				return
 			} else {
-				err := in.WriteFrame(conn, fr)
+				err := in.WriteFrame(p.CtrlConn, fr)
 				if err != nil {
 					logger.Error("Error writing frame:", err)
 					return
@@ -195,77 +183,82 @@ func (p *Proxy) manageCtrlConnectionOutgoing() {
 	}
 }
 
-func (p *Proxy) manageCtrlConnectionIncoming() {
-	conn := p.ctx.Ctx.Value("conn").(net.Conn)
-	defer func(conn net.Conn) {
-		if conn != nil {
-			err := conn.Close()
-			if err != nil {
-
-			}
-		}
-	}(conn)
-	logger.Log("Starting manageCtrlConnectionIncoming")
+func (p *Proxy) manageCtrlConnectionIncoming(ctx context.Context) {
+	logger.Debug("Starting manageCtrlConnectionIncoming")
+	// this context synchronizes all proxies to the connection of the CtrlConn. If it terminates, all proxies will be closed.
+	connCtx, cancel := context.WithCancel(ctx)
+	// suppressing warning, if the parent context is cancelled everything should be fine but the warning is annoying
+	defer cancel()
 
 	// Run a helper goroutine to close the connection when stop is received from console
 	wg.Add(1)
 	go func(conn net.Conn) {
 		defer wg.Done()
 		logger.Debug("mCCI subroutine: Waiting for ctx to be done")
-		<-p.ctx.Ctx.Done()
+		<-connCtx.Done()
 		p.NetOut <- in.NewCTRLFrame(in.CTRLUNPAIR, nil)
-		logger.Log("Closing TLS Conn")
+		logger.Debug("Closing TLS CtrlConn")
 		p.NetOut <- in.NewCTRLFrame(in.STOP, nil)
 		err := conn.Close()
 		if err != nil {
-			logger.Error("Error closing TLS conn:", err)
+			logger.Error("Error closing TLS CtrlConn", "Error", err)
 		}
 		logger.Debug("mCCI subroutine: Ctx done")
 		return
-	}(conn)
+	}(p.CtrlConn)
 
 	for {
 		select {
-		case <-p.ctx.Ctx.Done():
+		case <-connCtx.Done():
 			return
 		default:
-			p.handleCtrlFrame()
+			p.handleCtrlFrame(connCtx, cancel)
 		}
 	}
 }
 
-func (p *Proxy) handleCtrlFrame() {
-	conn := p.ctx.Ctx.Value("conn").(net.Conn)
+func (p *Proxy) handleCtrlFrame(ctx context.Context, cancel context.CancelFunc) {
 	// blocking read!
-	fr, err := in.ReadFrame(conn)
+	fr, err := in.ReadFrame(p.CtrlConn)
 	if err != nil {
-		logger.Error("Error reading frame, disconnecting:", err)
-		p.ctx.Cancel()
+		logger.Error("Error reading frame, disconnecting", "Error", err)
+		cancel()
 		return
 	}
-	logger.Log("Received frame from ctrlConn: " + strconv.Itoa(int(fr.Typ)) + " " + fr.Data[0])
+	logger.Debug("Received frame from ctrlConn: " + strconv.Itoa(int(fr.Typ)) + " " + fr.Data[0])
 	switch fr.Typ {
 	case in.CTRLUNPAIR:
-		p.ctx.Cancel()
+		logger.Info("Received unpair command")
+		cancel()
 	case in.CTRLEXPOSETCP:
+		logger.Info("Received exposetcp command", slog.String("port", fr.Data[0]))
 		port, err := strconv.Atoi(fr.Data[0])
 		if err != nil {
-			logger.Error("Error converting port to int:", err)
+			logger.Error("Error converting port to int", "Error", err)
 			return
 		}
-		ct := context.WithValue(p.ctx.Ctx, "port", port)
-		ct2, cancel := context.WithCancel(ct)
-		portCtx := in.ContextWithCancel{Ctx: ct2, Cancel: cancel}
-		p.exposedPorts[port] = portCtx
-		p.exposeTcpPreChecks(portCtx)
+		p.exposeTcpPreChecks(ctx, port)
 	case in.CTRLHIDETCP:
+		logger.Info("Received hidetcp command", slog.String("port", fr.Data[0]))
 		port, err := strconv.Atoi(fr.Data[0])
 		if err != nil {
-			logger.Error("Error converting port to int:", err)
+			logger.Error("Error converting port to int", "Error", err)
 			return
 		}
-		if p.exposedPorts[port].Ctx != nil {
-			p.exposedPorts[port].Cancel()
-		}
+		p.hidePort(port)
+	case in.CTRLEXPOSEUDP:
+		logger.Info("Received exposeudp command", slog.String("port", fr.Data[0]))
+
+	case in.CTRLHIDEUDP:
+		logger.Info("Received hideudp command", slog.String("port", fr.Data[0]))
+
 	}
+}
+
+func (p *Proxy) hidePort(port int) {
+	if relay, ok := p.exposedTcpPorts[port]; ok {
+		relay.cancel()
+		p.proxyPorts.ReturnPort(relay.proxyPort)
+	}
+	delete(p.exposedTcpPorts, port)
 }
