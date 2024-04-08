@@ -1,4 +1,4 @@
-package internal
+package Utils
 
 import (
 	"encoding/json"

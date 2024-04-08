@@ -1,10 +1,10 @@
-package main
+package Client
 
 import (
 	"context"
 	"crypto/tls"
 	"errors"
-	in "example.com/reverseproxy/cmd/internal"
+	in "example.com/reverseproxy/cmd/Utils"
 	"fmt"
 	"net"
 	"strconv"

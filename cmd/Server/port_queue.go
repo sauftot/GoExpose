@@ -1,4 +1,4 @@
-package main
+package Server
 
 type Portqueue struct {
 	ports []int

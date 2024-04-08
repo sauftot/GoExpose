@@ -1,4 +1,4 @@
-package main
+package Server
 
 import (
 	"context"
@@ -12,8 +12,6 @@ import (
 	"time"
 )
 
-var wg sync.WaitGroup
-var logger *slog.Logger
 var loglevel = new(slog.LevelVar)
 var consoleLogging = flag.Bool("consolelog", false, "Enable console logging")
 
@@ -47,19 +45,25 @@ func setupLoggerWriter() io.Writer {
 func main() {
 	// Setup logger
 	writer := setupLoggerWriter()
-	logger = slog.New(slog.NewTextHandler(writer, &slog.HandlerOptions{
+	logger := slog.New(slog.NewTextHandler(writer, &slog.HandlerOptions{
 		Level: loglevel,
 	}))
 
-	// ROOT CONTEXT
+	// GoExpose Server uses a root context to manage shutting down all goroutines, a sub-context will be derived for each
+	// open port that gets relayed by the server
 	ctx, cancel := context.WithCancel(context.Background())
+
+	// WaitGroup for synchronisation
+	var wg sync.WaitGroup
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 
-	server := Server{}
+	server := Server{
+		logger: logger,
+	}
 	wg.Add(1)
-	go server.run(ctx)
+	go server.run(ctx, &wg)
 
 	<-signals
 	cancel()
