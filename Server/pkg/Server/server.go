@@ -21,10 +21,12 @@ type Server struct {
 	Logger *slog.Logger
 }
 
+// Run is the main loop of the server. It first initializes the TLS config, then listens for incoming control connections.
+// When a connection is accepted, it is handled in a proxy instance until disconnect.
 func (s *Server) Run(context context.Context) {
 	config := s.prepareTlsConfig()
 	if config == nil {
-		s.Logger.Error("Error preparing TLS config:", nil)
+		s.Logger.Error("Error preparing TLS config", slog.String("Func", "Run"))
 		return
 	}
 
@@ -33,43 +35,41 @@ func (s *Server) Run(context context.Context) {
 		case <-context.Done():
 			return
 		default:
-			s.Logger.Info("Waiting for client to connect", slog.String("Port", CTRLPORT))
-			s.waitForCtrlConnection(context, config)
-			s.Logger.Info("Client connected", slog.String("IP", s.proxy.CtrlConn.RemoteAddr().String()))
-			// Run a goroutine that will handle all writes to the ctrl connection
-			go s.proxy.manageCtrlConnectionOutgoing(context)
-			// Keep reading from the ctrl connection till disconnected or closed
-			s.proxy.manageCtrlConnectionIncoming(context)
-			s.Logger.Info("Client disconnected", slog.String("IP", s.proxy.CtrlConn.RemoteAddr().String()))
-			// clean up
+			clientConn := s.ctrlListen(context, config)
+			if clientConn == nil {
+				continue
+			}
+			s.Logger.Debug("Accepted control connection", slog.String("Address", clientConn.RemoteAddr().String()))
+			HandleClient(context, clientConn, s.Logger)
 		}
 	}
 }
 
+// prepareTlsConfig reads the CA certificate, server key and certificate from the user's home directory and creates a tls.Config object.
 func (s *Server) prepareTlsConfig() *tls.Config {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		s.Logger.Error("Error getting home directory:", err)
+		s.Logger.Error("Error getting home directory", slog.String("Func", "prepareTlsConfig"), "Error", err)
 		return nil
 	}
 	filePath := filepath.Join(homeDir, "certs", "myCA.pem")
 	caCertData, err := os.ReadFile(filePath)
 	if err != nil {
-		s.Logger.Error("Error reading CA certificate:", err)
+		s.Logger.Error("Error reading CA certificate", slog.String("Func", "prepareTlsConfig"), "Error", err)
 		return nil
 	}
 
 	caCertPool := x509.NewCertPool()
 	ok := caCertPool.AppendCertsFromPEM(caCertData)
 	if !ok {
-		s.Logger.Error("Error appending CA certificate to pool.", nil)
+		s.Logger.Error("Error appending CA certificate to pool")
 		return nil
 	}
 	keyPath := filepath.Join(homeDir, "certs", "server.key")
 	crtPath := filepath.Join(homeDir, "certs", "server.crt")
 	cer, err := tls.LoadX509KeyPair(crtPath, keyPath)
 	if err != nil {
-		s.Logger.Error("Error loading key pair:", err)
+		s.Logger.Error("Error loading key pair", slog.String("Func", "prepareTlsConfig"), "Error", err)
 		return nil
 	}
 
@@ -82,36 +82,37 @@ func (s *Server) prepareTlsConfig() *tls.Config {
 	return tlsConfig
 }
 
-func (s *Server) waitForCtrlConnection(ctx context.Context, config *tls.Config) {
+// ctrlListen starts a TLS listener with the provided config and listens for incoming connections.
+// If a connection is accepted, it starts a proxy instance with the connection.
+// The function returns the accepted connection and nil if successful, or nil and an error.
+//
+// TODO: make the error handling more specific, panic in case of hard errors
+func (s *Server) ctrlListen(ctx context.Context, config *tls.Config) net.Conn {
 	l, err := tls.Listen("tcp", ":"+CTRLPORT, config)
 	if err != nil {
-		s.Logger.Error("Error TLS listening", slog.String("Port", CTRLPORT), "Error", err)
+		s.Logger.Error("Error TLS listening", slog.String("Func", "ctrlListen"), slog.String("Port", CTRLPORT), "Error", err)
 		panic(err)
 	}
-	listeningCtx, listCancel := context.WithCancel(ctx)
-	defer listCancel()
+	// listening context, to close the listener when the main context is cancelled or terminate the helper goroutine when the listener is closed
+	lctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	// Run a helper goroutine to close the listener when stop is received from console
+	// handle a helper goroutine to close the listener when stop is received from console, or when we have accepted a connection
 	go func(ctx context.Context, l net.Listener) {
-		s.Logger.Debug("Starting TLS listener")
 		<-ctx.Done()
-		s.Logger.Debug("Closing TLS listener")
+		s.Logger.Debug("Closing TLS listener", slog.String("Func", "ctrlListen"))
 		err := l.Close()
 		if err != nil {
-			s.Logger.Debug("Error closing TLS listener:", err)
+			s.Logger.Debug("Error closing TLS listener", slog.String("Func", "ctrlListen"), "Error", err)
 		}
-		l = nil
-		s.Logger.Debug("Stopping TLS listener")
-	}(listeningCtx, l)
+	}(lctx, l)
 
 	conn, err := l.Accept()
 	if err != nil {
-		s.Logger.Debug("Error accepting connection:", err)
-		return
+		s.Logger.Debug("TLS error accepting connection", slog.String("Func", "ctrlListen"), "Error", err)
+		return nil
 	}
 
 	s.Logger.Debug("Accepted connection, starting proxy", slog.String("Address", conn.RemoteAddr().String()))
-
-	s.proxy = NewProxy(conn, s.Logger)
-	return
+	return conn
 }

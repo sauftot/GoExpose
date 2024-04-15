@@ -13,7 +13,7 @@ var loglevel = mylog.DEBUG
 /*
 	STATUS:
 		- 2024-02-10: Proxying is working.
-		//TODO: improve logging, add tests
+		//TODO: rework this completely
 */
 
 func main() {

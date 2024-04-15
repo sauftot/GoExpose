@@ -20,6 +20,10 @@ type CTRLFrame struct {
 	Data []string
 }
 
+func (fr *CTRLFrame) String() string {
+	return "Type: " + string(fr.Typ) + " Data: " + fr.Data[0]
+}
+
 func NewCTRLFrame(typ byte, data []string) *CTRLFrame {
 	return &CTRLFrame{
 		Typ:  typ,
@@ -45,7 +49,7 @@ func FromByteArray(jsonBytes []byte) (*CTRLFrame, error) {
 }
 
 func ReadFrame(conn net.Conn) (*CTRLFrame, error) {
-	buf := make([]byte, 256)
+	buf := make([]byte, 1024)
 	n, err := conn.Read(buf)
 	if err != nil {
 		return nil, err

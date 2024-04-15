@@ -13,7 +13,7 @@ import (
 
 /*
 	Proxy structs handle one GoExpose client on the server side. Currently, GoExpose is limited to one client per server.
-
+	Proxy has a CtrlConn which is the connection to the client. It also has a NetOut channel which is used to send frames to the client.
 */
 
 type Proxy struct {
@@ -27,6 +27,8 @@ type Proxy struct {
 	logger *slog.Logger
 }
 
+// NewProxy creates a new Proxy object with the given connection and logger.
+// It prepares all needed channels and maps, and sets up a port queue for proxying.
 func NewProxy(conn net.Conn, logger *slog.Logger) *Proxy {
 	return &Proxy{
 		CtrlConn: conn,
@@ -39,6 +41,7 @@ func NewProxy(conn net.Conn, logger *slog.Logger) *Proxy {
 	}
 }
 
+// exposeTcpPreChecks checks if the port is within the valid range, if it is already exposed, and if there are any available proxy ports.
 func (p *Proxy) exposeTcpPreChecks(ctx context.Context, externalPort int) {
 	// Parse the port and check if it is within the valid range
 	if externalPort < 1024 || externalPort > 65535 {
@@ -125,31 +128,41 @@ func (p *Proxy) runExposerForPort(ctx context.Context, externalPort int, proxyPo
 	}
 }
 
-func (p *Proxy) RelayTcp(conn1, conn2 *net.TCPConn, ctx context.Context) {
+func (p *Proxy) RelayTcp(dest, src *net.TCPConn, ctx context.Context) {
 	defer func() {
-		_ = conn1.Close()
-		_ = conn2.Close()
+		p.logger.Debug("Closing connections", "Func", "RelayTcp")
+		_ = dest.Close()
+		_ = src.Close()
 	}()
 
 	for {
 		select {
 		case <-ctx.Done():
+			p.logger.Debug("Context done, closing relay", "Func", "RelayTcp")
 			return
 		default:
-			_, err := io.Copy(conn2, conn1)
+			var buf []byte
+			i, err := src.Read(buf)
 			if err != nil {
-				if errors.As(err, &net.ErrClosed) {
-					return
+				if !errors.Is(err, io.EOF) {
+					p.logger.Debug("Error reading from dest", "Error", err, "Func", "RelayTcp")
+				} else {
+					p.logger.Debug("EOF received, terminating relay", "Func", "RelayTcp")
 				}
-				p.logger.Error("Error relay copying", "Error", err)
+				return
+			}
+			_, err = dest.Write(buf[:i])
+			if err != nil {
+				if !errors.Is(err, io.EOF) {
+					p.logger.Debug("Error writing to src", "Error", err, "Func", "RelayTcp")
+				}
 				return
 			}
 		}
 	}
 }
 
-func (p *Proxy) manageCtrlConnectionOutgoing(ctx context.Context) {
-	p.logger.Debug("Starting manageCtrlConnectionOutgoing")
+func (p *Proxy) ctrlOutgoing(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -158,6 +171,7 @@ func (p *Proxy) manageCtrlConnectionOutgoing(ctx context.Context) {
 			if fr.Typ == in.STOP {
 				return
 			} else {
+				p.logger.Debug("Sending frame to ctrlConn", "Func", "ctrlOutgoing", "Frame type", fr.Typ, "Data", fr.Data[0])
 				err := in.WriteFrame(p.CtrlConn, fr)
 				if err != nil {
 					p.logger.Error("Error writing frame:", err)
@@ -171,8 +185,7 @@ func (p *Proxy) manageCtrlConnectionOutgoing(ctx context.Context) {
 	}
 }
 
-func (p *Proxy) manageCtrlConnectionIncoming(ctx context.Context) {
-	p.logger.Debug("Starting manageCtrlConnectionIncoming")
+func (p *Proxy) ctrlIncoming(ctx context.Context) {
 	// this context synchronizes all proxies to the connection of the CtrlConn. If it terminates, all proxies will be closed.
 	connCtx, cancel := context.WithCancel(ctx)
 	// suppressing warning, if the parent context is cancelled everything should be fine but the warning is annoying
@@ -180,7 +193,6 @@ func (p *Proxy) manageCtrlConnectionIncoming(ctx context.Context) {
 
 	// Run a helper goroutine to close the connection when stop is received from console
 	go func(conn net.Conn) {
-		p.logger.Debug("mCCI subroutine: Waiting for ctx to be done")
 		<-connCtx.Done()
 		p.NetOut <- in.NewCTRLFrame(in.CTRLUNPAIR, nil)
 		p.logger.Debug("Closing TLS CtrlConn")
@@ -189,7 +201,6 @@ func (p *Proxy) manageCtrlConnectionIncoming(ctx context.Context) {
 		if err != nil {
 			p.logger.Error("Error closing TLS CtrlConn", "Error", err)
 		}
-		p.logger.Debug("mCCI subroutine: Ctx done")
 		return
 	}(p.CtrlConn)
 
